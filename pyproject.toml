@@ -3,7 +3,27 @@ name = "neo-vision-clear"
 version = "0.1.0"
 description = "Fixed-camera occupancy detection demo using OpenCV"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 dependencies = [
-    "opencv-python>=4.10,<5",
+    "colorlog>=6.10.1",
+    "media-sources",
+    "numpy>=2.2.6,<3",
+    "opencv-python==4.13.0.92",
+    "pytz>=2026.2",
+    "pyyaml>=6.0.3",
 ]
+
+[project.scripts]
+neo-vision-clear = "occupancy_monitor.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["occupancy_monitor", "utils"]
+package-dir = { occupancy_monitor = "src/occupancy_monitor", utils = "utils" }
+
+[tool.uv.sources]
+media-sources = { path = "src/media-sources", editable = true }
+opencv-python = { path = "wheels/pc-x86_64/opencv_python-4.13.0.92-cp310-cp310-linux_x86_64.whl" }

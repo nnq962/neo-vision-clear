@@ -7,11 +7,15 @@ Chương trình chỉ dùng các thuật toán xử lý ảnh của OpenCV, khô
 
 ## Cài đặt
 
-Dự án yêu cầu Python 3.10 trở lên. Nếu dùng `uv`:
+Dự án hiện yêu cầu Python 3.10 để tương thích wheel OpenCV nội bộ. Nếu dùng `uv`:
 
 ```bash
 uv sync
 ```
+
+Môi trường hiện dùng wheel OpenCV nội bộ tại
+`wheels/pc-x86_64/opencv_python-4.13.0.92-cp310-cp310-linux_x86_64.whl`.
+Wheel này dành riêng cho CPython 3.10 trên Linux x86_64 và có hỗ trợ GStreamer.
 
 Hoặc dùng `venv` và `pip`:
 
@@ -54,6 +58,13 @@ các pixel nằm ngoài polygon bị loại bỏ hoàn toàn. Toàn bộ frame k
 ```bash
 uv run python main.py
 ```
+
+`main.py` chỉ là entry point. Mã nguồn ứng dụng được tổ chức trong
+`src/occupancy_monitor/` theo từng trách nhiệm: CLI, camera stream, cấu hình,
+giao diện và thuật toán phát hiện.
+
+Việc mở và đọc RTSP/video/webcam được thực hiện qua package nội bộ
+`src/media-sources` để có chung cơ chế reconnect và lựa chọn backend.
 
 - Khung xanh: `EMPTY`.
 - Khung đỏ: `OCCUPIED`.

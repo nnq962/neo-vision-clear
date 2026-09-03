@@ -1,0 +1,9 @@
+[project]
+name = "neo-vision-clear"
+version = "0.1.0"
+description = "Fixed-camera occupancy detection demo using OpenCV"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-python>=4.10,<5",
+]

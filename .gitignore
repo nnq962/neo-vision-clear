@@ -12,3 +12,6 @@ wheels/
 # Local camera configuration and captured reference image
 data/
 .env
+configs/monitor.yaml
+outputs/
+weights/

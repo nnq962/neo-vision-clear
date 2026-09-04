@@ -9,8 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
-# Local camera configuration and captured reference image
+# Dữ liệu calibration, checkpoint và output cục bộ
 data/
+checkpoints/
 .env
 configs/monitor.yaml
 outputs/

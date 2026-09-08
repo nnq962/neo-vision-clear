@@ -32,14 +32,19 @@ class CalibrationConfig:
 class DetectionConfig:
     """Cấu hình tạo mask thay đổi và ổn định trạng thái detection."""
 
-    noise_multiplier: float = 4.0
-    minimum_difference: float = 0.015
+    noise_multiplier: float = 6.0
+    minimum_difference: float = 0.03
     minimum_area_ratio: float = 0.01
     occupied_frames: int = 5
     clear_frames: int = 8
     camera_difference_threshold: float = 0.12
     camera_change_area_ratio: float = 0.25
     morphology_divisor: int = 180
+    depth_blur_kernel: int = 5
+    roi_border_margin: int = 6
+    mask_temporal_window: int = 5
+    mask_temporal_required: int = 3
+    display_minimum_area_ratio: float = 0.001
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -59,3 +64,15 @@ class DetectionConfig:
             raise ValueError("camera_change_area_ratio phải nằm trong (0, 1].")
         if self.morphology_divisor < 1:
             raise ValueError("morphology_divisor phải lớn hơn hoặc bằng 1.")
+        if self.depth_blur_kernel < 1 or self.depth_blur_kernel % 2 == 0:
+            raise ValueError("depth_blur_kernel phải là số lẻ dương.")
+        if self.roi_border_margin < 0:
+            raise ValueError("roi_border_margin không được âm.")
+        if self.mask_temporal_window < 1:
+            raise ValueError("mask_temporal_window phải lớn hơn hoặc bằng 1.")
+        if not 1 <= self.mask_temporal_required <= self.mask_temporal_window:
+            raise ValueError(
+                "mask_temporal_required phải nằm trong [1, mask_temporal_window]."
+            )
+        if not 0 <= self.display_minimum_area_ratio < 1:
+            raise ValueError("display_minimum_area_ratio phải nằm trong [0, 1).")

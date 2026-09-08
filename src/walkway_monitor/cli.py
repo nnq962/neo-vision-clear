@@ -74,8 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--checkpoint",
         help="Checkpoint model; mặc định lấy encoder baseline trong thư mục weights/.",
     )
-    detection_parser.add_argument("--noise-multiplier", type=float, default=4.0)
-    detection_parser.add_argument("--minimum-difference", type=float, default=0.015)
+    detection_parser.add_argument("--noise-multiplier", type=float, default=6.0)
+    detection_parser.add_argument("--minimum-difference", type=float, default=0.03)
     detection_parser.add_argument("--minimum-area-ratio", type=float, default=0.01)
     detection_parser.add_argument("--occupied-frames", type=int, default=5)
     detection_parser.add_argument("--clear-frames", type=int, default=8)
@@ -88,6 +88,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--camera-change-area-ratio",
         type=float,
         default=0.25,
+    )
+    detection_parser.add_argument("--depth-blur-kernel", type=int, default=5)
+    detection_parser.add_argument("--roi-border-margin", type=int, default=6)
+    detection_parser.add_argument("--mask-temporal-window", type=int, default=5)
+    detection_parser.add_argument("--mask-temporal-required", type=int, default=3)
+    detection_parser.add_argument(
+        "--display-minimum-area-ratio",
+        type=float,
+        default=0.001,
     )
     detection_parser.add_argument(
         "--no-display",
@@ -160,6 +169,11 @@ def run_detection(args: argparse.Namespace) -> int:
         clear_frames=args.clear_frames,
         camera_difference_threshold=args.camera_difference_threshold,
         camera_change_area_ratio=args.camera_change_area_ratio,
+        depth_blur_kernel=args.depth_blur_kernel,
+        roi_border_margin=args.roi_border_margin,
+        mask_temporal_window=args.mask_temporal_window,
+        mask_temporal_required=args.mask_temporal_required,
+        display_minimum_area_ratio=args.display_minimum_area_ratio,
     )
     config.validate()
     checkpoint = args.checkpoint or str(

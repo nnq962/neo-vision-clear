@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import time
 
+import cv2
 import numpy as np
 
 from walkway_monitor.config import DetectionConfig
 from walkway_monitor.depth.alignment import align_depth
-from walkway_monitor.detection.components import clean_changed_mask, largest_component
+from walkway_monitor.detection.components import (
+    clean_changed_mask,
+    filter_components_by_area,
+    largest_component,
+)
+from walkway_monitor.detection.mask_filter import TemporalMaskFilter
 from walkway_monitor.detection.models import DetectionOutput, DetectionResult
 from walkway_monitor.detection.temporal_filter import TemporalOccupancyFilter
 from walkway_monitor.models import BaselineArtifact
@@ -30,6 +36,15 @@ class OccupancyDetector:
         self._roi = self._roi_mask > 0
         self._support = ~self._roi
         self._roi_area = int(np.count_nonzero(self._roi))
+        self._detection_roi_mask = self._erode_roi(
+            self._roi_mask,
+            config.roi_border_margin,
+        )
+        self._detection_roi = self._detection_roi_mask > 0
+        if np.count_nonzero(self._detection_roi) < 100:
+            raise ValueError(
+                "ROI còn lại quá nhỏ sau khi bỏ biên; hãy giảm roi_border_margin."
+            )
         support_area = int(np.count_nonzero(self._support))
         minimum_support = max(10, int(self._support.size * 0.001))
         if self._roi_area < 100:
@@ -44,6 +59,11 @@ class OccupancyDetector:
             - np.percentile(reference_values, 5.0)
         )
         self._depth_span = max(self._depth_span, 1e-6)
+        self._reference_smoothed = cv2.GaussianBlur(
+            baseline.reference_depth,
+            (config.depth_blur_kernel, config.depth_blur_kernel),
+            0,
+        )
         normalized_noise = baseline.noise_map / np.float32(self._depth_span)
         self._threshold_map = np.maximum(
             np.float32(config.minimum_difference),
@@ -57,6 +77,14 @@ class OccupancyDetector:
         self._temporal_filter = TemporalOccupancyFilter(
             occupied_frames=config.occupied_frames,
             clear_frames=config.clear_frames,
+        )
+        self._mask_filter = TemporalMaskFilter(
+            window_size=config.mask_temporal_window,
+            required_frames=config.mask_temporal_required,
+        )
+        self._display_minimum_area = max(
+            1,
+            int(round(self._roi_area * config.display_minimum_area_ratio)),
         )
         self._frame_index = 0
 
@@ -81,16 +109,23 @@ class OccupancyDetector:
             self._baseline.reference_depth,
             self._support,
         )
-        normalized_difference = (
-            np.abs(aligned - self._baseline.reference_depth) / self._depth_span
+        smoothed = cv2.GaussianBlur(
+            aligned,
+            (self._config.depth_blur_kernel, self._config.depth_blur_kernel),
+            0,
+        )
+        signed_difference = (
+            (smoothed - self._reference_smoothed) / self._depth_span
         ).astype(np.float32)
+        normalized_difference = np.maximum(signed_difference, 0.0).astype(np.float32)
+        absolute_difference = np.abs(signed_difference)
         health_threshold = np.maximum(
             self._threshold_map,
             np.float32(self._config.camera_difference_threshold),
         )
         outside_change_ratio = float(
             np.count_nonzero(
-                (normalized_difference >= health_threshold) & self._support
+                (absolute_difference >= health_threshold) & self._support
             )
             / np.count_nonzero(self._support)
         )
@@ -99,21 +134,30 @@ class OccupancyDetector:
         )
 
         raw_mask = (
-            (normalized_difference >= self._threshold_map) & self._roi
+            (normalized_difference >= self._threshold_map) & self._detection_roi
         ).astype(np.uint8) * 255
-        changed_mask = clean_changed_mask(
+        decision_mask = clean_changed_mask(
             raw_mask,
-            self._roi_mask,
+            self._detection_roi_mask,
             self._kernel_size,
         )
-        component = largest_component(changed_mask)
+        component = largest_component(decision_mask)
         largest_area_ratio = component.area / self._roi_area
-        changed_area_ratio = float(np.count_nonzero(changed_mask) / self._roi_area)
+        changed_area_ratio = float(np.count_nonzero(decision_mask) / self._roi_area)
         raw_occupied = largest_area_ratio >= self._config.minimum_area_ratio
         state = self._temporal_filter.update(
             raw_occupied=raw_occupied,
             valid=camera_is_stable,
         )
+        if camera_is_stable:
+            stable_mask = self._mask_filter.update(decision_mask)
+            changed_mask = filter_components_by_area(
+                stable_mask,
+                self._display_minimum_area,
+            )
+        else:
+            self._mask_filter.reset()
+            changed_mask = np.zeros_like(decision_mask, dtype=np.uint8)
         reason = None if camera_is_stable else "camera_or_scene_changed"
         result = DetectionResult(
             state=state,
@@ -137,3 +181,17 @@ class OccupancyDetector:
             normalized_difference=normalized_difference,
             threshold_map=self._threshold_map,
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _erode_roi(roi_mask: np.ndarray, margin: int) -> np.ndarray:
+        """Co ROI vào một số pixel để tạo dead band chống nhiễu ở biên polygon."""
+        if margin <= 0:
+            return roi_mask.astype(np.uint8, copy=True)
+        kernel_size = margin * 2 + 1
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (kernel_size, kernel_size),
+        )
+        return cv2.erode(roi_mask.astype(np.uint8), kernel, iterations=1)

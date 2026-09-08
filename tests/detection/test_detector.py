@@ -73,6 +73,9 @@ class OccupancyDetectorTestCase(unittest.TestCase):
         self.assertEqual(first_occupied.result.state, OccupancyState.CLEAR)
         self.assertEqual(second_occupied.result.state, OccupancyState.OCCUPIED)
         self.assertEqual(third_occupied.result.state, OccupancyState.OCCUPIED)
+        self.assertEqual(int(np.count_nonzero(first_occupied.changed_mask)), 0)
+        self.assertEqual(int(np.count_nonzero(second_occupied.changed_mask)), 0)
+        self.assertGreater(int(np.count_nonzero(third_occupied.changed_mask)), 0)
         self.assertGreater(second_occupied.result.largest_area_ratio, 0.02)
 
     # ─────────────────────────────────────────────────────────────────────────

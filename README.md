@@ -123,11 +123,20 @@ FPS=18.62 | inference=42.1ms | detection=3.4ms | render=0.0ms | state=clear
 
 | Tham số | Mặc định | Ý nghĩa |
 |---|---:|---|
-| `--noise-multiplier` | `4.0` | Nhân noise map của baseline để tạo threshold từng pixel |
-| `--minimum-difference` | `0.015` | Ngưỡng sai khác depth chuẩn hóa tối thiểu |
+| `--noise-multiplier` | `6.0` | Nhân noise map của baseline để tạo threshold từng pixel |
+| `--minimum-difference` | `0.03` | Ngưỡng depth gần hơn baseline tối thiểu |
 | `--minimum-area-ratio` | `0.01` | Component lớn nhất phải chiếm ít nhất 1% ROI |
 | `--occupied-frames` | `5` | Số frame liên tiếp để xác nhận có vật cản |
 | `--clear-frames` | `8` | Số frame liên tiếp để xác nhận lối đi trống |
+| `--depth-blur-kernel` | `5` | Làm mượt depth trước khi so sánh |
+| `--roi-border-margin` | `6` | Bỏ qua dải 6 pixel sát biên ROI |
+| `--mask-temporal-window` | `5` | Số frame gần nhất dùng để ổn định mask đỏ |
+| `--mask-temporal-required` | `3` | Pixel phải xuất hiện ít nhất 3/5 frame |
+| `--display-minimum-area-ratio` | `0.001` | Loại mảng đỏ nhỏ hơn 0.1% ROI |
+
+Mask đỏ chỉ lấy depth gần camera hơn baseline, sau đó làm mượt, bỏ nhiễu biên, voting
+theo thời gian và loại component nhỏ. Các bước này chỉ cải thiện vùng hiển thị; state machine
+`CLEAR/OCCUPIED` vẫn là lớp logic riêng.
 
 Nếu phần lớn vùng ngoài ROI thay đổi bất thường, detector trả `UNKNOWN` thay vì kết luận lối
 đi trống. Điều này giúp nhận biết camera bị dịch chuyển hoặc khung cảnh không còn khớp baseline.

@@ -63,3 +63,24 @@ def largest_component(mask: np.ndarray) -> ComponentStats:
         area=int(stats[component_index, cv2.CC_STAT_AREA]),
         bounding_box=(x, y, width, height),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def filter_components_by_area(mask: np.ndarray, minimum_area: int) -> np.ndarray:
+    """Chỉ giữ các connected component có diện tích không nhỏ hơn ngưỡng."""
+    if mask.ndim != 2:
+        raise ValueError("Mask phải là mảng hai chiều.")
+    if minimum_area <= 1:
+        return mask.astype(np.uint8, copy=True)
+    count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        mask.astype(np.uint8),
+        connectivity=8,
+    )
+    filtered = np.zeros_like(mask, dtype=np.uint8)
+    for component_index in range(1, count):
+        area = int(stats[component_index, cv2.CC_STAT_AREA])
+        if area >= minimum_area:
+            filtered[labels == component_index] = 255
+    return filtered

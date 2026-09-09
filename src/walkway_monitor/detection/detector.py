@@ -13,85 +13,97 @@ from walkway_monitor.detection.components import (
     clean_changed_mask,
     filter_components_by_area,
     largest_component,
+    measure_walkway_clearance,
 )
-from walkway_monitor.detection.mask_filter import TemporalMaskFilter
-from walkway_monitor.detection.models import DetectionOutput, DetectionResult
-from walkway_monitor.detection.temporal_filter import TemporalOccupancyFilter
+from walkway_monitor.detection.models import (
+    DetectionOutput,
+    DetectionResult,
+    OccupancyState,
+)
 from walkway_monitor.models import BaselineArtifact
 
 
 class OccupancyDetector:
-    """So sánh depth hiện tại với baseline và ổn định kết quả theo thời gian."""
+    """Căn chỉnh robust rồi so sánh depth với baseline theo từng frame."""
 
     def __init__(self, baseline: BaselineArtifact, config: DetectionConfig):
-        """Chuẩn bị mask, threshold chuẩn hóa và temporal filter cho detector."""
+        """Chuẩn bị mask và threshold chuẩn hóa dùng chung cho detector."""
+        # Bước 1: kiểm tra dữ liệu baseline và các tham số detection trước khi
+        # tạo những dữ liệu trung gian dùng chung cho tất cả frame.
         baseline.validate()
         config.validate()
         self._baseline = baseline
         self._config = config
+
+        # Bước 2: chuyển polygon ROI thành mask toàn ảnh. Đây là vùng duy nhất
+        # được dùng để tính diện tích vật cản, quyết định trạng thái và vẽ đỏ.
         self._roi_mask = baseline.roi.to_mask(
             baseline.frame_width,
             baseline.frame_height,
         )
         self._roi = self._roi_mask > 0
-        self._support = ~self._roi
         self._roi_area = int(np.count_nonzero(self._roi))
-        self._detection_roi_mask = self._erode_roi(
-            self._roi_mask,
-            config.roi_border_margin,
-        )
-        self._detection_roi = self._detection_roi_mask > 0
-        if np.count_nonzero(self._detection_roi) < 100:
-            raise ValueError(
-                "ROI còn lại quá nhỏ sau khi bỏ biên; hãy giảm roi_border_margin."
-            )
-        support_area = int(np.count_nonzero(self._support))
-        minimum_support = max(10, int(self._support.size * 0.001))
         if self._roi_area < 100:
             raise ValueError("ROI baseline quá nhỏ để chạy detection.")
-        if support_area < minimum_support:
-            raise ValueError(
-                "Vùng ngoài ROI quá nhỏ để căn chỉnh depth; hãy calibration ROI hẹp hơn."
-            )
-        reference_values = baseline.reference_depth[np.isfinite(baseline.reference_depth)]
+
+        # Bước 3: giãn ROI ra ngoài để tạo check area gồm ROI và một lớp đệm.
+        # So sánh depth và morphology chỉ nhìn vùng này; cảnh ở xa ROI bị bỏ.
+        self._check_area_mask = self._dilate_roi(
+            self._roi_mask,
+            config.check_area_padding,
+        )
+        self._check_area = self._check_area_mask > 0
+
+        # Bước 4: tính dải depth điển hình trong check area. Dải này được dùng để
+        # chuẩn hóa sai khác, vì Depth Anything trả depth tương đối chứ không
+        # phải khoảng cách theo mét.
+        reference_values = baseline.reference_depth[self._check_area]
         self._depth_span = float(
             np.percentile(reference_values, 95.0)
             - np.percentile(reference_values, 5.0)
         )
         self._depth_span = max(self._depth_span, 1e-6)
+
+        # Bước 5: làm mượt reference depth một lần tại đây. Mỗi depth map mới
+        # cũng sẽ được làm mượt tương tự trước khi so sánh trong process().
         self._reference_smoothed = cv2.GaussianBlur(
             baseline.reference_depth,
             (config.depth_blur_kernel, config.depth_blur_kernel),
             0,
         )
+
+        # Bước 6: tạo threshold riêng cho từng pixel từ noise_map. Pixel vốn
+        # nhiều nhiễu sẽ cần sai khác lớn hơn mới được xem là thay đổi thật.
         normalized_noise = baseline.noise_map / np.float32(self._depth_span)
         self._threshold_map = np.maximum(
             np.float32(config.minimum_difference),
             normalized_noise * np.float32(config.noise_multiplier),
         ).astype(np.float32)
+
+        # Bước 7: chọn kích thước kernel morphology theo độ phân giải baseline
+        # để loại đốm nhỏ và nối các vùng thay đổi nằm gần nhau.
         kernel_size = max(
             3,
             int(round(min(baseline.frame_height, baseline.frame_width) / config.morphology_divisor)),
         )
         self._kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-        self._temporal_filter = TemporalOccupancyFilter(
-            occupied_frames=config.occupied_frames,
-            clear_frames=config.clear_frames,
-        )
-        self._mask_filter = TemporalMaskFilter(
-            window_size=config.mask_temporal_window,
-            required_frames=config.mask_temporal_required,
-        )
+
+        # Bước 8: quy đổi tỷ lệ component nhỏ nhất cần hiển thị thành số pixel
+        # dựa trên diện tích ROI gốc.
         self._display_minimum_area = max(
             1,
             int(round(self._roi_area * config.display_minimum_area_ratio)),
         )
+
+        # Bước 9: bắt đầu đánh số các depth map được process() xử lý từ 0.
         self._frame_index = 0
 
     # ─────────────────────────────────────────────────────────────────────────
 
     def process(self, current_depth: np.ndarray) -> DetectionOutput:
         """Xử lý một depth map và trả về trạng thái cùng các mask debug."""
+        # Bước 1: chuẩn hóa input về float32 và bảo đảm depth map hiện tại có
+        # cùng kích thước với baseline, không chứa NaN hoặc giá trị vô cực.
         depth = np.asarray(current_depth, dtype=np.float32)
         expected_shape = (
             self._baseline.frame_height,
@@ -104,79 +116,114 @@ class OccupancyDetector:
         if not np.all(np.isfinite(depth)):
             raise ValueError("Depth hiện tại chứa giá trị không hữu hạn.")
 
-        aligned, scale, shift = align_depth(
-            depth,
-            self._baseline.reference_depth,
-            self._support,
-        )
+        # Bước 2: mặc định fit scale/shift trên ROI bằng hồi quy robust. Chỉ
+        # nhóm pixel khớp baseline nhất được giữ lại, vì vậy người hoặc vật cản
+        # không kéo lệch toàn bộ depth map. Khi CLI tắt alignment, dùng nguyên
+        # depth raw và đặt scale=1, shift=0.
+        if self._config.depth_alignment:
+            aligned, scale, shift = align_depth(
+                depth,
+                self._baseline.reference_depth,
+                self._roi,
+                inlier_ratio=self._config.alignment_inlier_ratio,
+            )
+        else:
+            aligned = depth
+            scale, shift = 1.0, 0.0
+
+        # Bước 3: làm mượt depth đã căn chỉnh bằng đúng Gaussian kernel đã dùng
+        # cho reference để giảm các dao động nhỏ theo không gian.
         smoothed = cv2.GaussianBlur(
             aligned,
             (self._config.depth_blur_kernel, self._config.depth_blur_kernel),
             0,
         )
+
+        # Bước 4: trừ reference và chia cho `_depth_span` để thu sai khác tương
+        # đối. Chỉ phần dương được giữ để tìm vật nằm gần camera hơn baseline.
         signed_difference = (
             (smoothed - self._reference_smoothed) / self._depth_span
         ).astype(np.float32)
         normalized_difference = np.maximum(signed_difference, 0.0).astype(np.float32)
-        absolute_difference = np.abs(signed_difference)
-        health_threshold = np.maximum(
-            self._threshold_map,
-            np.float32(self._config.camera_difference_threshold),
-        )
-        outside_change_ratio = float(
-            np.count_nonzero(
-                (absolute_difference >= health_threshold) & self._support
-            )
-            / np.count_nonzero(self._support)
-        )
-        camera_is_stable = (
-            outside_change_ratio < self._config.camera_change_area_ratio
-        )
 
+        # Bước 5: tạo mask thay đổi và chạy morphology trên toàn check area để
+        # padding cung cấp ngữ cảnh cho các pixel nằm sát biên ROI.
         raw_mask = (
-            (normalized_difference >= self._threshold_map) & self._detection_roi
+            (normalized_difference >= self._threshold_map) & self._check_area
         ).astype(np.uint8) * 255
-        decision_mask = clean_changed_mask(
+        cleaned_check_mask = clean_changed_mask(
             raw_mask,
-            self._detection_roi_mask,
+            self._check_area_mask,
             self._kernel_size,
         )
-        component = largest_component(decision_mask)
-        largest_area_ratio = component.area / self._roi_area
-        changed_area_ratio = float(np.count_nonzero(decision_mask) / self._roi_area)
-        raw_occupied = largest_area_ratio >= self._config.minimum_area_ratio
-        state = self._temporal_filter.update(
-            raw_occupied=raw_occupied,
-            valid=camera_is_stable,
+
+        # Bước 6: sau khi làm sạch, cắt mask trở lại ROI. Thay đổi chỉ nằm trong
+        # padding sẽ không được vẽ và không tham gia quyết định trạng thái.
+        decision_mask = cleaned_check_mask
+        decision_mask[~self._roi] = 0
+
+        # Bước 7: bỏ các component quá nhỏ rồi dùng chính mask này cho cả phần
+        # hiển thị lẫn đánh giá bề rộng, tránh vật cản vô hình làm đổi trạng thái.
+        changed_mask = filter_components_by_area(
+            decision_mask,
+            self._display_minimum_area,
         )
-        if camera_is_stable:
-            stable_mask = self._mask_filter.update(decision_mask)
-            changed_mask = filter_components_by_area(
-                stable_mask,
-                self._display_minimum_area,
-            )
-        else:
-            self._mask_filter.reset()
-            changed_mask = np.zeros_like(decision_mask, dtype=np.uint8)
-        reason = None if camera_is_stable else "camera_or_scene_changed"
+
+        # Bước 8: giữ thống kê component và diện tích để debug, nhưng không dùng
+        # diện tích tổng để quyết định lối đi có bị chặn hay không.
+        component = largest_component(changed_mask)
+        largest_area_ratio = component.area / self._roi_area
+        changed_area_ratio = float(np.count_nonzero(changed_mask) / self._roi_area)
+
+        # Bước 9: trên mỗi hàng của polygon ROI, đo khoảng trống liên tục lớn
+        # nhất từ trái sang phải. Median trên vài hàng lân cận giúp một hàng
+        # pixel nhiễu không trở thành nút thắt giả.
+        clearance = measure_walkway_clearance(
+            changed_mask,
+            self._roi_mask,
+            self._config.width_smoothing_rows,
+        )
+        width_blocked = (
+            clearance.minimum_free_width_ratio
+            < self._config.minimum_free_width_ratio
+        )
+
+        # Bước 10: kết luận trực tiếp theo bề rộng còn trống của frame hiện tại,
+        # không chờ xác nhận qua nhiều frame.
+        state = (
+            OccupancyState.OCCUPIED
+            if width_blocked
+            else OccupancyState.CLEAR
+        )
+
+        # Bước 11: đóng gói trạng thái và các số liệu debug của frame hiện tại.
         result = DetectionResult(
             state=state,
-            raw_occupied=raw_occupied if camera_is_stable else False,
+            width_blocked=width_blocked,
             largest_component_area=component.area,
             bounding_box=component.bounding_box,
             largest_area_ratio=float(largest_area_ratio),
             changed_area_ratio=changed_area_ratio,
-            outside_change_ratio=outside_change_ratio,
+            minimum_free_width_ratio=clearance.minimum_free_width_ratio,
+            obstacle_width_ratio=clearance.obstacle_width_ratio,
+            bottleneck_row=clearance.bottleneck_row,
+            bottleneck_span=clearance.bottleneck_span,
             alignment_scale=scale,
             alignment_shift=shift,
+            alignment_inlier_ratio=self._config.alignment_inlier_ratio,
+            alignment_enabled=self._config.depth_alignment,
             frame_index=self._frame_index,
             timestamp=time.time(),
-            reason=reason,
         )
+
+        # Bước 12: tăng frame index và trả cả kết quả logic lẫn các map dùng để
+        # render giao diện, heatmap và mask đỏ.
         self._frame_index += 1
         return DetectionOutput(
             result=result,
+            raw_depth=depth,
             aligned_depth=aligned,
+            check_area_mask=self._check_area_mask,
             changed_mask=changed_mask,
             normalized_difference=normalized_difference,
             threshold_map=self._threshold_map,
@@ -185,13 +232,13 @@ class OccupancyDetector:
     # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _erode_roi(roi_mask: np.ndarray, margin: int) -> np.ndarray:
-        """Co ROI vào một số pixel để tạo dead band chống nhiễu ở biên polygon."""
-        if margin <= 0:
+    def _dilate_roi(roi_mask: np.ndarray, padding: int) -> np.ndarray:
+        """Giãn ROI ra ngoài một số pixel để tạo vùng kiểm tra có lớp đệm."""
+        if padding <= 0:
             return roi_mask.astype(np.uint8, copy=True)
-        kernel_size = margin * 2 + 1
+        kernel_size = padding * 2 + 1
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE,
             (kernel_size, kernel_size),
         )
-        return cv2.erode(roi_mask.astype(np.uint8), kernel, iterations=1)
+        return cv2.dilate(roi_mask.astype(np.uint8), kernel, iterations=1)

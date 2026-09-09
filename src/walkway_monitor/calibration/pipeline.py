@@ -20,6 +20,7 @@ from walkway_monitor.config import CalibrationConfig
 from walkway_monitor.depth.estimator import DepthEstimator
 from walkway_monitor.models import BaselineArtifact, RoiDefinition
 from walkway_monitor.ui import draw_text
+from walkway_monitor.ui.detection_view import colorize_depth
 
 
 class CalibrationPipeline:
@@ -38,9 +39,10 @@ class CalibrationPipeline:
         source,
         output_path: str | Path,
         preview_path: str | Path | None = None,
+        depth_preview_path: str | Path | None = None,
         **media_options,
     ) -> BaselineArtifact:
-        """Chạy toàn bộ calibration tương tác và lưu baseline cùng ảnh preview."""
+        """Chạy calibration và lưu baseline cùng các ảnh preview RGB, depth."""
         LOGGER.info("Bắt đầu calibration từ nguồn media.")
         try:
             with MediaSources(source, **media_options) as media:
@@ -69,6 +71,12 @@ class CalibrationPipeline:
             else saved_path.with_suffix(".preview.jpg")
         )
         save_preview(first_frame, roi, artifact, actual_preview)
+        actual_depth_preview = (
+            Path(depth_preview_path)
+            if depth_preview_path is not None
+            else saved_path.with_suffix(".depth.jpg")
+        )
+        save_reference_depth_preview(artifact, actual_depth_preview)
         LOGGER.info(
             "Calibration hoàn tất | noise_p99=%.6f | alignment_error=%.6f",
             artifact.noise_p99,
@@ -164,4 +172,37 @@ def save_preview(
     if not cv2.imwrite(str(output_path), preview):
         raise RuntimeError(f"Không thể lưu ảnh preview: {output_path}")
     LOGGER.info("Đã lưu ảnh preview: %s", output_path)
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def save_reference_depth_preview(
+    artifact: BaselineArtifact,
+    path: str | Path,
+) -> Path:
+    """Tô màu và lưu reference depth thành ảnh để kiểm tra calibration."""
+    artifact.validate()
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    preview = colorize_depth(
+        artifact.reference_depth,
+        artifact.reference_depth,
+    )
+    roi_points = artifact.roi.to_pixel_points(
+        artifact.frame_width,
+        artifact.frame_height,
+    )
+    cv2.polylines(
+        preview,
+        [roi_points],
+        True,
+        (0, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    if not cv2.imwrite(str(output_path), preview):
+        raise RuntimeError(f"Không thể lưu ảnh reference depth: {output_path}")
+    LOGGER.info("Đã lưu ảnh reference depth: %s", output_path)
     return output_path

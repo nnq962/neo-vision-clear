@@ -9,9 +9,8 @@ import numpy as np
 
 
 class OccupancyState(Enum):
-    """Trạng thái ổn định của lối đi tại một thời điểm."""
+    """Trạng thái tức thời của lối đi tại một frame."""
 
-    UNKNOWN = "unknown"
     CLEAR = "clear"
     OCCUPIED = "occupied"
 
@@ -25,21 +24,35 @@ class ComponentStats:
 
 
 @dataclass(frozen=True)
+class WalkwayClearanceStats:
+    """Thống kê bề rộng còn trống tại nút thắt của ROI."""
+
+    minimum_free_width_ratio: float
+    obstacle_width_ratio: float
+    bottleneck_row: int | None
+    bottleneck_span: tuple[int, int] | None
+
+
+@dataclass(frozen=True)
 class DetectionResult:
     """Kết quả phát hiện và các chỉ số debug của một frame."""
 
     state: OccupancyState
-    raw_occupied: bool
+    width_blocked: bool
     largest_component_area: int
     bounding_box: tuple[int, int, int, int] | None
     largest_area_ratio: float
     changed_area_ratio: float
-    outside_change_ratio: float
+    minimum_free_width_ratio: float
+    obstacle_width_ratio: float
+    bottleneck_row: int | None
+    bottleneck_span: tuple[int, int] | None
     alignment_scale: float
     alignment_shift: float
+    alignment_inlier_ratio: float
+    alignment_enabled: bool
     frame_index: int
     timestamp: float
-    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,7 +60,9 @@ class DetectionOutput:
     """Kết quả detection cùng các mask dùng cho hiển thị và tuning."""
 
     result: DetectionResult
+    raw_depth: np.ndarray
     aligned_depth: np.ndarray
+    check_area_mask: np.ndarray
     changed_mask: np.ndarray
     normalized_difference: np.ndarray
     threshold_map: np.ndarray

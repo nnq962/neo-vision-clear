@@ -50,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Đường dẫn ảnh preview; mặc định nằm cạnh file baseline.",
     )
     calibration_parser.add_argument(
+        "--depth-preview",
+        help="Đường dẫn heatmap reference depth; mặc định nằm cạnh file baseline.",
+    )
+    calibration_parser.add_argument(
         "--no-gstreamer",
         action="store_true",
         help="Bỏ qua GStreamer và mở RTSP bằng FFMPEG.",
@@ -76,23 +80,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     detection_parser.add_argument("--noise-multiplier", type=float, default=6.0)
     detection_parser.add_argument("--minimum-difference", type=float, default=0.03)
-    detection_parser.add_argument("--minimum-area-ratio", type=float, default=0.01)
-    detection_parser.add_argument("--occupied-frames", type=int, default=5)
-    detection_parser.add_argument("--clear-frames", type=int, default=8)
-    detection_parser.add_argument(
-        "--camera-difference-threshold",
-        type=float,
-        default=0.12,
-    )
-    detection_parser.add_argument(
-        "--camera-change-area-ratio",
-        type=float,
-        default=0.25,
-    )
+    detection_parser.add_argument("--minimum-free-width-ratio", type=float, default=0.55)
+    detection_parser.add_argument("--width-smoothing-rows", type=int, default=9)
     detection_parser.add_argument("--depth-blur-kernel", type=int, default=5)
-    detection_parser.add_argument("--roi-border-margin", type=int, default=6)
-    detection_parser.add_argument("--mask-temporal-window", type=int, default=5)
-    detection_parser.add_argument("--mask-temporal-required", type=int, default=3)
+    detection_parser.add_argument("--check-area-padding", type=int, default=12)
+    detection_parser.add_argument(
+        "--no-depth-alignment",
+        action="store_true",
+        help="Tắt robust alignment và so sánh trực tiếp depth raw với baseline.",
+    )
+    detection_parser.add_argument("--alignment-inlier-ratio", type=float, default=0.55)
     detection_parser.add_argument(
         "--display-minimum-area-ratio",
         type=float,
@@ -148,6 +145,7 @@ def run_calibration(args: argparse.Namespace) -> int:
         source=parse_source(args.source),
         output_path=args.output,
         preview_path=args.preview,
+        depth_preview_path=args.depth_preview,
         use_gstreamer=not args.no_gstreamer,
         open_timeout_ms=args.open_timeout_ms,
         read_timeout_ms=args.read_timeout_ms,
@@ -164,15 +162,12 @@ def run_detection(args: argparse.Namespace) -> int:
     config = DetectionConfig(
         noise_multiplier=args.noise_multiplier,
         minimum_difference=args.minimum_difference,
-        minimum_area_ratio=args.minimum_area_ratio,
-        occupied_frames=args.occupied_frames,
-        clear_frames=args.clear_frames,
-        camera_difference_threshold=args.camera_difference_threshold,
-        camera_change_area_ratio=args.camera_change_area_ratio,
+        minimum_free_width_ratio=args.minimum_free_width_ratio,
+        width_smoothing_rows=args.width_smoothing_rows,
         depth_blur_kernel=args.depth_blur_kernel,
-        roi_border_margin=args.roi_border_margin,
-        mask_temporal_window=args.mask_temporal_window,
-        mask_temporal_required=args.mask_temporal_required,
+        check_area_padding=args.check_area_padding,
+        depth_alignment=not args.no_depth_alignment,
+        alignment_inlier_ratio=args.alignment_inlier_ratio,
         display_minimum_area_ratio=args.display_minimum_area_ratio,
     )
     config.validate()

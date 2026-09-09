@@ -22,10 +22,10 @@ class DetectionPipeline:
 
     def __init__(
         self,
-        estimator: DepthEstimator,
-        baseline: BaselineArtifact,
-        config: DetectionConfig,
-        display: bool = True,
+        estimator   : DepthEstimator,
+        baseline    : BaselineArtifact,
+        config      : DetectionConfig,
+        display     : bool = True,
         log_interval: float = 2.0,
     ):
         """Khởi tạo detector và lưu các dependency chạy realtime."""
@@ -143,14 +143,13 @@ class DetectionPipeline:
 
     @staticmethod
     def _log_state(output: DetectionOutput) -> None:
-        """Ghi log khi trạng thái ổn định của lối đi thay đổi."""
+        """Ghi log khi trạng thái tức thời của lối đi thay đổi."""
         result = output.result
         LOGGER.info(
-            "Trạng thái=%s | vùng lớn nhất=%.2f%% | ngoài ROI=%.2f%% | lý do=%s",
+            "Trạng thái=%s | trống hẹp nhất=%.2f%% | vật tại nút thắt=%.2f%%",
             result.state.value,
-            result.largest_area_ratio * 100,
-            result.outside_change_ratio * 100,
-            result.reason or "-",
+            result.minimum_free_width_ratio * 100,
+            result.obstacle_width_ratio * 100,
         )
 
     # ─────────────────────────────────────────────────────────────────────────

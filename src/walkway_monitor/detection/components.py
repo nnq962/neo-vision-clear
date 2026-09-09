@@ -5,7 +5,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from walkway_monitor.detection.models import ComponentStats
+from walkway_monitor.detection.models import ComponentStats, WalkwayClearanceStats
 
 
 def clean_changed_mask(
@@ -84,3 +84,73 @@ def filter_components_by_area(mask: np.ndarray, minimum_area: int) -> np.ndarray
         if area >= minimum_area:
             filtered[labels == component_index] = 255
     return filtered
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def measure_walkway_clearance(
+    obstacle_mask: np.ndarray,
+    roi_mask: np.ndarray,
+    smoothing_rows: int,
+) -> WalkwayClearanceStats:
+    """Đo khoảng trống liên tục lớn nhất trên từng lát cắt ngang của ROI."""
+    if obstacle_mask.shape != roi_mask.shape:
+        raise ValueError("obstacle_mask và roi_mask phải cùng kích thước.")
+    if obstacle_mask.ndim != 2:
+        raise ValueError("Mask phải là mảng hai chiều.")
+    if smoothing_rows < 1 or smoothing_rows % 2 == 0:
+        raise ValueError("smoothing_rows phải là số lẻ dương.")
+
+    roi = roi_mask > 0
+    obstacle = (obstacle_mask > 0) & roi
+    rows: list[int] = []
+    spans: list[tuple[int, int]] = []
+    free_width_ratios: list[float] = []
+    obstacle_width_ratios: list[float] = []
+
+    for row in range(roi.shape[0]):
+        columns = np.flatnonzero(roi[row])
+        if columns.size < 2:
+            continue
+        left, right = int(columns[0]), int(columns[-1])
+        row_roi = roi[row, left : right + 1]
+        row_obstacle = obstacle[row, left : right + 1]
+        free = row_roi & ~row_obstacle
+        padded = np.pad(free.astype(np.int8), (1, 1))
+        transitions = np.diff(padded)
+        starts = np.flatnonzero(transitions == 1)
+        ends = np.flatnonzero(transitions == -1)
+        largest_free_width = int(np.max(ends - starts)) if starts.size else 0
+        roi_width = int(np.count_nonzero(row_roi))
+
+        rows.append(row)
+        spans.append((left, right))
+        free_width_ratios.append(largest_free_width / roi_width)
+        obstacle_width_ratios.append(
+            float(np.count_nonzero(row_obstacle) / roi_width)
+        )
+
+    if not rows:
+        return WalkwayClearanceStats(1.0, 0.0, None, None)
+
+    free_profile = np.asarray(free_width_ratios, dtype=np.float32)
+    obstacle_profile = np.asarray(obstacle_width_ratios, dtype=np.float32)
+    half_window = smoothing_rows // 2
+    smoothed_profile = np.empty_like(free_profile)
+    smoothed_obstacle_profile = np.empty_like(obstacle_profile)
+    for index in range(free_profile.size):
+        start = max(0, index - half_window)
+        end = min(free_profile.size, index + half_window + 1)
+        smoothed_profile[index] = np.median(free_profile[start:end])
+        smoothed_obstacle_profile[index] = np.median(
+            obstacle_profile[start:end]
+        )
+
+    bottleneck_index = int(np.argmin(smoothed_profile))
+    return WalkwayClearanceStats(
+        minimum_free_width_ratio=float(smoothed_profile[bottleneck_index]),
+        obstacle_width_ratio=float(smoothed_obstacle_profile[bottleneck_index]),
+        bottleneck_row=rows[bottleneck_index],
+        bottleneck_span=spans[bottleneck_index],
+    )

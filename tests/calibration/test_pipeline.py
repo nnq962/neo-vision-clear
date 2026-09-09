@@ -58,8 +58,8 @@ class FakeMediaSources:
 class CalibrationPipelineTestCase(unittest.TestCase):
     """Kiểm tra pipeline điều phối và tạo đủ artifact đầu ra."""
 
-    def test_pipeline_writes_baseline_and_preview(self) -> None:
-        """Pipeline phải lưu được NPZ và preview khi các dependency hoạt động."""
+    def test_pipeline_writes_baseline_and_previews(self) -> None:
+        """Pipeline phải lưu được NPZ cùng preview RGB và reference depth."""
         roi = RoiDefinition(
             normalized_points=np.array(
                 [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -92,6 +92,7 @@ class CalibrationPipelineTestCase(unittest.TestCase):
                 artifact = pipeline.run("video.mp4", output)
             self.assertTrue(output.is_file())
             self.assertTrue(output.with_suffix(".preview.jpg").is_file())
+            self.assertTrue(output.with_suffix(".depth.jpg").is_file())
             self.assertEqual(artifact.frame_count, 5)
             self.assertEqual(artifact.source_type, "VIDEO")
 

@@ -4,7 +4,10 @@ import unittest
 
 import numpy as np
 
-from walkway_monitor.ui.detection_view import colorize_depth
+from walkway_monitor.config import DetectionConfig
+from walkway_monitor.detection.detector import OccupancyDetector
+from walkway_monitor.ui.detection_view import colorize_depth, render_detection_view
+from tests.detection.test_detector import make_baseline
 
 
 class DepthHeatmapTestCase(unittest.TestCase):
@@ -17,6 +20,22 @@ class DepthHeatmapTestCase(unittest.TestCase):
         self.assertEqual(heatmap.shape, (20, 30, 3))
         self.assertEqual(heatmap.dtype, np.uint8)
         self.assertGreater(len(np.unique(heatmap.reshape(-1, 3), axis=0)), 10)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_detection_view_draws_check_area_padding(self) -> None:
+        """Giao diện phải vẽ viền check area màu xanh bên ngoài ROI."""
+        baseline = make_baseline()
+        detector = OccupancyDetector(
+            baseline,
+            DetectionConfig(check_area_padding=6),
+        )
+        output = detector.process(baseline.reference_depth)
+        frame = np.zeros((60, 80, 3), dtype=np.uint8)
+        view = render_detection_view(frame, baseline, output, fps=10.0)
+        self.assertEqual(view.shape, (60, 240, 3))
+        cyan = np.array([255, 255, 0], dtype=np.uint8)
+        self.assertTrue(np.any(np.all(view[:, :80] == cyan, axis=2)))
 
 
 if __name__ == "__main__":

@@ -32,6 +32,26 @@ class AlignmentTestCase(unittest.TestCase):
         self.assertAlmostEqual(scale, 1.0, places=5)
         self.assertAlmostEqual(shift, 0.0, places=5)
 
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_robust_fit_ignores_large_obstacle(self) -> None:
+        """Vật cản dưới 45% support không được kéo lệch scale và shift nền."""
+        reference = np.linspace(0.2, 4.0, 10_000, dtype=np.float32).reshape(100, 100)
+        current = (reference - 0.7) / 1.8
+        current[20:60, :] += 4.0
+
+        aligned, scale, shift = align_depth(
+            current,
+            reference,
+            inlier_ratio=0.55,
+        )
+
+        background = np.ones_like(reference, dtype=bool)
+        background[20:60, :] = False
+        np.testing.assert_allclose(aligned[background], reference[background], atol=1e-4)
+        self.assertAlmostEqual(scale, 1.8, places=4)
+        self.assertAlmostEqual(shift, 0.7, places=4)
+
 
 if __name__ == "__main__":
     unittest.main()

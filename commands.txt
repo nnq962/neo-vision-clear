@@ -1,0 +1,6 @@
+uv run walkway-monitor calibrate \
+  --source "rtsp://admin:061223%40bC@10.70.22.220:554/Streaming/Channels/101" \
+  --frames 160
+
+
+uv run walkway-monitor detect --source 'rtsp://admin:061223%40bC@10.70.22.220:554/Streaming/Channels/101' --baseline data/walkway_baseline.npz  --minimum-difference 0.08 --no-depth-alignment

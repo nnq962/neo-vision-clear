@@ -4,3 +4,11 @@ uv run walkway-monitor calibrate \
 
 
 uv run walkway-monitor detect --source 'rtsp://admin:061223%40bC@10.70.22.220:554/Streaming/Channels/101' --baseline data/walkway_baseline.npz  --minimum-difference 0.08 --no-depth-alignment
+
+
+uv run walkway-monitor detect \
+  --source 'rtsp://...' \
+  --baseline data/walkway_baseline.npz \
+  --no-depth-alignment \
+  --minimum-difference 0.01 \
+  --minimum-free-width-ratio 0.55

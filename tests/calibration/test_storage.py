@@ -1,5 +1,6 @@
 """Kiểm thử round-trip của định dạng baseline NPZ."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,18 +8,28 @@ from pathlib import Path
 import numpy as np
 
 from walkway_monitor.calibration.storage import load_baseline, save_baseline
-from walkway_monitor.models import BaselineArtifact, RoiDefinition
+from walkway_monitor.models import BaselineArtifact, RoiDefinition, WorldCoordinates
 
 
 class BaselineStorageTestCase(unittest.TestCase):
     """Kiểm tra artifact không mất dữ liệu sau khi lưu và đọc lại."""
 
     def test_save_and_load_without_pickle(self) -> None:
-        """Baseline NPZ phải round-trip đầy đủ với allow_pickle=False."""
+        """Baseline NPZ phải round-trip và tạo JSON metadata tương ứng."""
         roi = RoiDefinition(
             normalized_points=np.array(
                 [[0.1, 0.1], [0.8, 0.1], [0.8, 0.8]], dtype=np.float32
-            )
+            ),
+            world_coordinates=WorldCoordinates(
+                points=np.array(
+                    [[0.0, 0.0], [1.75, 0.0], [1.75, 4.55]],
+                    dtype=np.float32,
+                ),
+                unit="m",
+                origin="P1",
+                x_axis="Từ trái sang phải",
+                y_axis="Từ trên xuống dưới",
+            ),
         )
         artifact = BaselineArtifact(
             reference_depth=np.arange(24, dtype=np.float32).reshape(4, 6),
@@ -39,6 +50,9 @@ class BaselineStorageTestCase(unittest.TestCase):
             loaded = load_baseline(path)
             with np.load(path, allow_pickle=False) as raw:
                 self.assertIn("metadata_json", raw.files)
+            json_path = path.with_suffix(".json")
+            self.assertTrue(json_path.is_file())
+            exported = json.loads(json_path.read_text(encoding="utf-8"))
         np.testing.assert_array_equal(loaded.reference_depth, artifact.reference_depth)
         np.testing.assert_array_equal(loaded.noise_map, artifact.noise_map)
         np.testing.assert_allclose(
@@ -46,6 +60,19 @@ class BaselineStorageTestCase(unittest.TestCase):
             artifact.roi.normalized_points,
         )
         self.assertEqual(loaded.encoder, artifact.encoder)
+        np.testing.assert_allclose(
+            exported["roi_points_normalized"],
+            artifact.roi.normalized_points,
+        )
+        self.assertEqual(exported["format_version"], artifact.format_version)
+        self.assertEqual(exported["frame_width"], artifact.frame_width)
+        self.assertEqual(exported["frame_height"], artifact.frame_height)
+        self.assertIsNotNone(loaded.roi.world_coordinates)
+        np.testing.assert_allclose(
+            loaded.roi.world_coordinates.points,
+            artifact.roi.world_coordinates.points,
+        )
+        self.assertEqual(exported["world_coordinates"]["unit"], "m")
 
 
 if __name__ == "__main__":

@@ -12,10 +12,44 @@ BASELINE_FORMAT_VERSION = 1
 
 
 @dataclass(frozen=True)
+class WorldCoordinates:
+    """Tọa độ thực tương ứng với từng đỉnh ROI và mô tả hệ quy chiếu."""
+
+    points: np.ndarray
+    unit: str
+    origin: str
+    x_axis: str
+    y_axis: str
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def validate(self, expected_point_count: int) -> None:
+        """Kiểm tra số điểm, giá trị tọa độ và mô tả hệ quy chiếu."""
+        points = np.asarray(self.points)
+        if points.shape != (expected_point_count, 2):
+            raise ValueError(
+                "Tọa độ thực phải có shape "
+                f"({expected_point_count}, 2), nhận được {points.shape}."
+            )
+        if not np.all(np.isfinite(points)):
+            raise ValueError("Tọa độ thực chứa giá trị không hữu hạn.")
+        descriptions = (self.unit, self.origin, self.x_axis, self.y_axis)
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in descriptions
+        ):
+            raise ValueError("Thông tin hệ tọa độ thực không được để trống.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
 class RoiDefinition:
     """Polygon ROI được lưu bằng tọa độ chuẩn hóa trong khoảng từ 0 đến 1."""
 
     normalized_points: np.ndarray
+    world_coordinates: WorldCoordinates | None = None
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -28,6 +62,8 @@ class RoiDefinition:
             raise ValueError("ROI chứa tọa độ không hữu hạn.")
         if np.any(points < 0.0) or np.any(points > 1.0):
             raise ValueError("Tọa độ chuẩn hóa của ROI phải nằm trong [0, 1].")
+        if self.world_coordinates is not None:
+            self.world_coordinates.validate(len(points))
 
     # ─────────────────────────────────────────────────────────────────────────
 

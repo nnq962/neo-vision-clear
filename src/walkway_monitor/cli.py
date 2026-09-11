@@ -80,8 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     detection_parser.add_argument("--noise-multiplier", type=float, default=6.0)
     detection_parser.add_argument("--minimum-difference", type=float, default=0.03)
-    detection_parser.add_argument("--minimum-free-width-ratio", type=float, default=0.55)
-    detection_parser.add_argument("--width-smoothing-rows", type=int, default=9)
+    detection_parser.add_argument(
+        "--bev-pixels-per-meter",
+        type=float,
+        default=100.0,
+        help="Độ phân giải raster dùng để đo mask BEV.",
+    )
     detection_parser.add_argument("--depth-blur-kernel", type=int, default=5)
     detection_parser.add_argument("--check-area-padding", type=int, default=12)
     detection_parser.add_argument(
@@ -99,6 +103,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-display",
         action="store_true",
         help="Không mở cửa sổ OpenCV; phù hợp khi xử lý video tự động.",
+    )
+    detection_parser.add_argument(
+        "--depth-heatmaps",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Bật hoặc tắt hai panel heatmap depth trong cửa sổ debug.",
     )
     detection_parser.add_argument(
         "--log-interval",
@@ -162,8 +172,7 @@ def run_detection(args: argparse.Namespace) -> int:
     config = DetectionConfig(
         noise_multiplier=args.noise_multiplier,
         minimum_difference=args.minimum_difference,
-        minimum_free_width_ratio=args.minimum_free_width_ratio,
-        width_smoothing_rows=args.width_smoothing_rows,
+        bev_pixels_per_meter=args.bev_pixels_per_meter,
         depth_blur_kernel=args.depth_blur_kernel,
         check_area_padding=args.check_area_padding,
         depth_alignment=not args.no_depth_alignment,
@@ -184,6 +193,7 @@ def run_detection(args: argparse.Namespace) -> int:
         baseline=baseline,
         config=config,
         display=not args.no_display,
+        show_depth_heatmaps=args.depth_heatmaps,
         log_interval=args.log_interval,
     )
     pipeline.run(

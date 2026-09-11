@@ -34,8 +34,7 @@ class DetectionConfig:
 
     noise_multiplier           : float = 6.0
     minimum_difference         : float = 0.03
-    minimum_free_width_ratio   : float = 0.55
-    width_smoothing_rows       : int   = 9
+    bev_pixels_per_meter       : float = 100.0
     morphology_divisor         : int   = 180
     depth_blur_kernel          : int   = 5
     check_area_padding         : int   = 12
@@ -51,10 +50,8 @@ class DetectionConfig:
             raise ValueError("noise_multiplier không được âm.")
         if self.minimum_difference <= 0:
             raise ValueError("minimum_difference phải là số dương.")
-        if not 0 < self.minimum_free_width_ratio <= 1:
-            raise ValueError("minimum_free_width_ratio phải nằm trong (0, 1].")
-        if self.width_smoothing_rows < 1 or self.width_smoothing_rows % 2 == 0:
-            raise ValueError("width_smoothing_rows phải là số lẻ dương.")
+        if self.bev_pixels_per_meter <= 0:
+            raise ValueError("bev_pixels_per_meter phải là số dương.")
         if self.morphology_divisor < 1:
             raise ValueError("morphology_divisor phải lớn hơn hoặc bằng 1.")
         if self.depth_blur_kernel < 1 or self.depth_blur_kernel % 2 == 0:

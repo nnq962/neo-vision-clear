@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "colorlog>=6.10.1",
+    "fastapi>=0.141.1",
     "numpy>=2.2.6,<3",
     "opencv-python==4.13.0.92",
     "pillow>=10.0.0",
@@ -13,11 +14,14 @@ dependencies = [
     "pyyaml>=6.0.3",
     "torch>=2.14.0",
     "torchvision>=0.29.0",
+    "uvicorn>=0.52.4",
+    "websockets>=16.1.1",
     "yt-dlp>=2026.6.9",
 ]
 
 [project.scripts]
 walkway-monitor = "walkway_monitor.cli:main"
+walkway-server = "server.__main__:main"
 
 [build-system]
 requires = ["setuptools>=69"]
@@ -30,6 +34,10 @@ packages = [
     "walkway_monitor.depth",
     "walkway_monitor.detection",
     "walkway_monitor.ui",
+    "server",
+    "server.models",
+    "server.routes",
+    "server.services",
     "depth_anything_v2",
     "depth_anything_v2.dinov2_layers",
     "depth_anything_v2.util",
@@ -41,3 +49,8 @@ package-dir = { "" = "src", utils = "utils" }
 
 [tool.uv.sources]
 opencv-python = { path = "wheels/pc-x86_64/opencv_python-4.13.0.92-cp310-cp310-linux_x86_64.whl" }
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.12.0",
+]

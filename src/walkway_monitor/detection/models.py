@@ -1,68 +1,73 @@
-"""Các kiểu dữ liệu kết quả của pipeline detection."""
+"""Các kiểu dữ liệu đầu ra của quá trình phân tích lối đi."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 
 import numpy as np
 
 
-class OccupancyState(Enum):
-    """Trạng thái tức thời của lối đi tại một frame."""
+@dataclass(frozen=True)
+class RouteCapacity:
+    """Kết quả đo khả năng đi xuyên suốt trên mặt phẳng BEV."""
 
-    CLEAR = "clear"
-    OCCUPIED = "occupied"
+    maximum_passable_width_meters: float
+    walkway_width_meters: float
+    bottleneck_y_meters: float
+    bottleneck_free_x_ranges_meters: tuple[tuple[float, float], ...]
+    bottleneck_world_span: tuple[float, float]
+    bottleneck_row: int
 
 
 @dataclass(frozen=True)
-class ComponentStats:
-    """Thống kê connected component thay đổi lớn nhất trong ROI."""
+class CorridorSnapshot:
+    """Dữ liệu nghiệp vụ gọn nhẹ có thể dùng để xuất cho robot."""
 
-    area: int
-    bounding_box: tuple[int, int, int, int] | None
+    maximum_passable_width_meters: float
+    walkway_width_meters: float
+    bottleneck_y_meters: float
+    bottleneck_free_x_ranges_meters: tuple[tuple[float, float], ...]
+    frame_index: int
+    captured_at: float
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def to_dict(self) -> dict[str, object]:
+        """Chuyển snapshot thành cấu trúc thuần Python sẵn sàng mã hóa JSON."""
+        # Giữ tên field ổn định và đổi tuple thành list để payload JSON rõ ràng.
+        return {
+            "maximum_passable_width_meters": self.maximum_passable_width_meters,
+            "walkway_width_meters": self.walkway_width_meters,
+            "bottleneck": {
+                "y_meters": self.bottleneck_y_meters,
+                "free_x_ranges_meters": [
+                    [start, end]
+                    for start, end in self.bottleneck_free_x_ranges_meters
+                ],
+            },
+            "frame_index": self.frame_index,
+            "captured_at": self.captured_at,
+        }
 
 
 @dataclass(frozen=True)
-class WalkwayClearanceStats:
-    """Thống kê bề rộng còn trống tại nút thắt của ROI."""
+class AnalysisDiagnostics:
+    """Thông tin kỹ thuật chỉ phục vụ quan sát và tinh chỉnh nội bộ."""
 
-    minimum_free_width_ratio: float
-    obstacle_width_ratio: float
-    bottleneck_row: int | None
-    bottleneck_span: tuple[int, int] | None
-
-
-@dataclass(frozen=True)
-class DetectionResult:
-    """Kết quả phát hiện và các chỉ số debug của một frame."""
-
-    state: OccupancyState
-    width_blocked: bool
-    largest_component_area: int
-    bounding_box: tuple[int, int, int, int] | None
-    largest_area_ratio: float
-    changed_area_ratio: float
-    minimum_free_width_ratio: float
-    obstacle_width_ratio: float
-    bottleneck_row: int | None
-    bottleneck_span: tuple[int, int] | None
     alignment_scale: float
     alignment_shift: float
     alignment_inlier_ratio: float
     alignment_enabled: bool
-    frame_index: int
-    timestamp: float
 
 
 @dataclass(frozen=True)
 class DetectionOutput:
-    """Kết quả detection cùng các mask dùng cho hiển thị và tuning."""
+    """Snapshot nghiệp vụ và các ảnh trung gian cần cho giao diện debug."""
 
-    result: DetectionResult
+    snapshot: CorridorSnapshot
+    route_capacity: RouteCapacity
+    diagnostics: AnalysisDiagnostics
     raw_depth: np.ndarray
     aligned_depth: np.ndarray
     check_area_mask: np.ndarray
     changed_mask: np.ndarray
-    normalized_difference: np.ndarray
-    threshold_map: np.ndarray

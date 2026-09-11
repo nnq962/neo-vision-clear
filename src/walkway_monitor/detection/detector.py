@@ -1,4 +1,4 @@
-"""Detector thuần chuyển một depth map thành trạng thái chiếm dụng lối đi."""
+"""Phân tích depth map thành mask và các phép đo hình học của lối đi."""
 
 from __future__ import annotations
 
@@ -9,22 +9,22 @@ import numpy as np
 
 from walkway_monitor.config import DetectionConfig
 from walkway_monitor.depth.alignment import align_depth
+from walkway_monitor.detection.bev import build_metric_bev_transform
 from walkway_monitor.detection.components import (
     clean_changed_mask,
     filter_components_by_area,
-    largest_component,
-    measure_walkway_clearance,
+    measure_route_capacity,
 )
 from walkway_monitor.detection.models import (
+    AnalysisDiagnostics,
+    CorridorSnapshot,
     DetectionOutput,
-    DetectionResult,
-    OccupancyState,
 )
 from walkway_monitor.models import BaselineArtifact
 
 
-class OccupancyDetector:
-    """Căn chỉnh robust rồi so sánh depth với baseline theo từng frame."""
+class WalkwayAnalyzer:
+    """Căn chỉnh depth, tạo mask và trả số đo mà không đưa ra kết luận."""
 
     def __init__(self, baseline: BaselineArtifact, config: DetectionConfig):
         """Chuẩn bị mask và threshold chuẩn hóa dùng chung cho detector."""
@@ -36,7 +36,7 @@ class OccupancyDetector:
         self._config = config
 
         # Bước 2: chuyển polygon ROI thành mask toàn ảnh. Đây là vùng duy nhất
-        # được dùng để tính diện tích vật cản, quyết định trạng thái và vẽ đỏ.
+        # được dùng để tính diện tích vùng thay đổi và các phép đo hình học.
         self._roi_mask = baseline.roi.to_mask(
             baseline.frame_width,
             baseline.frame_height,
@@ -95,13 +95,20 @@ class OccupancyDetector:
             int(round(self._roi_area * config.display_minimum_area_ratio)),
         )
 
-        # Bước 9: bắt đầu đánh số các depth map được process() xử lý từ 0.
+        # Bước 9: chuẩn bị phép chiếu metric một lần. Phân tích cho robot luôn
+        # cần đơn vị mét nên baseline thiếu tọa độ thực sẽ báo lỗi ngay tại đây.
+        self._metric_bev = build_metric_bev_transform(
+            baseline,
+            config.bev_pixels_per_meter,
+        )
+
+        # Bước 10: bắt đầu đánh số các depth map được process() xử lý từ 0.
         self._frame_index = 0
 
     # ─────────────────────────────────────────────────────────────────────────
 
     def process(self, current_depth: np.ndarray) -> DetectionOutput:
-        """Xử lý một depth map và trả về trạng thái cùng các mask debug."""
+        """Xử lý một depth map và trả về phép đo cùng các mask debug."""
         # Bước 1: chuẩn hóa input về float32 và bảo đảm depth map hiện tại có
         # cùng kích thước với baseline, không chứa NaN hoặc giá trị vô cực.
         depth = np.asarray(current_depth, dtype=np.float32)
@@ -158,75 +165,61 @@ class OccupancyDetector:
         )
 
         # Bước 6: sau khi làm sạch, cắt mask trở lại ROI. Thay đổi chỉ nằm trong
-        # padding sẽ không được vẽ và không tham gia quyết định trạng thái.
-        decision_mask = cleaned_check_mask
-        decision_mask[~self._roi] = 0
+        # padding sẽ không được vẽ và không tham gia phép đo trong ROI.
+        measurement_mask = cleaned_check_mask
+        measurement_mask[~self._roi] = 0
 
         # Bước 7: bỏ các component quá nhỏ rồi dùng chính mask này cho cả phần
-        # hiển thị lẫn đánh giá bề rộng, tránh vật cản vô hình làm đổi trạng thái.
+        # hiển thị lẫn đo bề rộng, tránh component vô hình làm sai số liệu.
         changed_mask = filter_components_by_area(
-            decision_mask,
+            measurement_mask,
             self._display_minimum_area,
         )
 
-        # Bước 8: giữ thống kê component và diện tích để debug, nhưng không dùng
-        # diện tích tổng để quyết định lối đi có bị chặn hay không.
-        component = largest_component(changed_mask)
-        largest_area_ratio = component.area / self._roi_area
-        changed_area_ratio = float(np.count_nonzero(changed_mask) / self._roi_area)
-
-        # Bước 9: trên mỗi hàng của polygon ROI, đo khoảng trống liên tục lớn
-        # nhất từ trái sang phải. Median trên vài hàng lân cận giúp một hàng
-        # pixel nhiễu không trở thành nút thắt giả.
-        clearance = measure_walkway_clearance(
-            changed_mask,
-            self._roi_mask,
-            self._config.width_smoothing_rows,
-        )
-        width_blocked = (
-            clearance.minimum_free_width_ratio
-            < self._config.minimum_free_width_ratio
+        # Bước 8: chiếu mask sang raster BEV và đo footprint rộng nhất có vùng
+        # tâm nối liên tục từ đầu tới cuối hành lang.
+        bev_changed_mask = self._metric_bev.warp_mask(changed_mask)
+        capacity = measure_route_capacity(
+            bev_changed_mask,
+            self._metric_bev.roi_mask,
+            self._metric_bev.entrance_mask,
+            self._metric_bev.exit_mask,
+            self._metric_bev.pixels_per_meter,
+            self._metric_bev.minimum_world_x,
+            self._metric_bev.minimum_world_y,
         )
 
-        # Bước 10: kết luận trực tiếp theo bề rộng còn trống của frame hiện tại,
-        # không chờ xác nhận qua nhiều frame.
-        state = (
-            OccupancyState.OCCUPIED
-            if width_blocked
-            else OccupancyState.CLEAR
+        # Bước 9: tách snapshot nghiệp vụ khỏi chẩn đoán căn chỉnh nội bộ.
+        captured_at = time.time()
+        snapshot = CorridorSnapshot(
+            maximum_passable_width_meters=(
+                capacity.maximum_passable_width_meters
+            ),
+            walkway_width_meters=capacity.walkway_width_meters,
+            bottleneck_y_meters=capacity.bottleneck_y_meters,
+            bottleneck_free_x_ranges_meters=(
+                capacity.bottleneck_free_x_ranges_meters
+            ),
+            frame_index=self._frame_index,
+            captured_at=captured_at,
         )
-
-        # Bước 11: đóng gói trạng thái và các số liệu debug của frame hiện tại.
-        result = DetectionResult(
-            state=state,
-            width_blocked=width_blocked,
-            largest_component_area=component.area,
-            bounding_box=component.bounding_box,
-            largest_area_ratio=float(largest_area_ratio),
-            changed_area_ratio=changed_area_ratio,
-            minimum_free_width_ratio=clearance.minimum_free_width_ratio,
-            obstacle_width_ratio=clearance.obstacle_width_ratio,
-            bottleneck_row=clearance.bottleneck_row,
-            bottleneck_span=clearance.bottleneck_span,
+        diagnostics = AnalysisDiagnostics(
             alignment_scale=scale,
             alignment_shift=shift,
             alignment_inlier_ratio=self._config.alignment_inlier_ratio,
             alignment_enabled=self._config.depth_alignment,
-            frame_index=self._frame_index,
-            timestamp=time.time(),
         )
 
-        # Bước 12: tăng frame index và trả cả kết quả logic lẫn các map dùng để
-        # render giao diện, heatmap và mask đỏ.
+        # Bước 10: tăng frame index và chỉ trả các ảnh thật sự được UI sử dụng.
         self._frame_index += 1
         return DetectionOutput(
-            result=result,
+            snapshot=snapshot,
+            route_capacity=capacity,
+            diagnostics=diagnostics,
             raw_depth=depth,
             aligned_depth=aligned,
             check_area_mask=self._check_area_mask,
             changed_mask=changed_mask,
-            normalized_difference=normalized_difference,
-            threshold_map=self._threshold_map,
         )
 
     # ─────────────────────────────────────────────────────────────────────────

@@ -1,11 +1,10 @@
-"""Phát hiện vật cản bằng cách so sánh depth hiện tại với baseline."""
+"""Phân tích vật cản và đo hình học lối đi từ depth hiện tại."""
 
-from .detector import OccupancyDetector
-from .models import DetectionOutput, DetectionResult, OccupancyState
+from .detector import WalkwayAnalyzer
+from .models import CorridorSnapshot, DetectionOutput
 
 __all__ = [
     "DetectionOutput",
-    "DetectionResult",
-    "OccupancyDetector",
-    "OccupancyState",
+    "WalkwayAnalyzer",
+    "CorridorSnapshot",
 ]

@@ -1,8 +1,10 @@
-"""Pipeline đọc full frame, suy luận depth và hiển thị trạng thái lối đi."""
+"""Pipeline đọc full frame, suy luận depth và hiển thị phép đo lối đi."""
 
 from __future__ import annotations
 
 import time
+import threading
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -11,10 +13,10 @@ from media_sources import MediaSources
 from utils.logger import LOGGER
 from walkway_monitor.config import DetectionConfig
 from walkway_monitor.depth.estimator import DepthEstimator
-from walkway_monitor.detection.detector import OccupancyDetector
-from walkway_monitor.detection.models import DetectionOutput, OccupancyState
+from walkway_monitor.detection.detector import WalkwayAnalyzer
+from walkway_monitor.detection.models import CorridorSnapshot, DetectionOutput
 from walkway_monitor.models import BaselineArtifact
-from walkway_monitor.ui import render_detection_view
+from walkway_monitor.ui import DetectionViewRenderer
 
 
 class DetectionPipeline:
@@ -26,20 +28,30 @@ class DetectionPipeline:
         baseline    : BaselineArtifact,
         config      : DetectionConfig,
         display     : bool = True,
+        show_depth_heatmaps: bool = True,
         log_interval: float = 2.0,
     ):
-        """Khởi tạo detector và lưu các dependency chạy realtime."""
+        """Khởi tạo analyzer và lưu các dependency chạy realtime."""
         if log_interval < 0:
             raise ValueError("log_interval không được âm.")
         self._estimator = estimator
         self._baseline = baseline
-        self._detector = OccupancyDetector(baseline, config)
+        self._analyzer = WalkwayAnalyzer(baseline, config)
+        self._renderer = DetectionViewRenderer(baseline) if display else None
         self._display = display
+        self._show_depth_heatmaps = show_depth_heatmaps
         self._log_interval = log_interval
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def run(self, source, **media_options) -> int:
+    def run(
+        self,
+        source,
+        *,
+        stop_event: threading.Event | None = None,
+        on_snapshot: Callable[[CorridorSnapshot], None] | None = None,
+        **media_options,
+    ) -> int:
         """Xử lý nguồn tới khi video kết thúc hoặc người dùng nhấn Q/Esc."""
         processed_frames = 0
         smooth_fps = 0.0
@@ -48,26 +60,31 @@ class DetectionPipeline:
         window_started = run_started
         window_frames = 0
         window_inference_time = 0.0
-        window_detection_time = 0.0
+        window_analysis_time = 0.0
         window_render_time = 0.0
-        previous_state: OccupancyState | None = None
         LOGGER.info(
-            "Bắt đầu detection full frame ở độ phân giải %dx%d.",
+            "Bắt đầu phân tích full frame ở độ phân giải %dx%d.",
             self._baseline.frame_width,
             self._baseline.frame_height,
         )
         try:
             with MediaSources(source, **media_options) as media:
                 for frames, _metas in media:
+                    # Cho phép lifespan của server dừng worker mà không phải
+                    # kết thúc cưỡng bức process đang chạy.
+                    if stop_event is not None and stop_event.is_set():
+                        break
                     frame = resize_to_baseline(frames[0], self._baseline)
 
                     inference_started = time.perf_counter()
                     depth = self._estimator.predict(frame)
                     inference_time = time.perf_counter() - inference_started
 
-                    detection_started = time.perf_counter()
-                    output = self._detector.process(depth)
-                    detection_time = time.perf_counter() - detection_started
+                    analysis_started = time.perf_counter()
+                    output = self._analyzer.process(depth)
+                    if on_snapshot is not None:
+                        on_snapshot(output.snapshot)
+                    analysis_time = time.perf_counter() - analysis_started
                     processed_frames += 1
 
                     now = time.perf_counter()
@@ -78,10 +95,6 @@ class DetectionPipeline:
                         else 0.9 * smooth_fps + 0.1 * instant_fps
                     )
                     last_time = now
-                    if output.result.state is not previous_state:
-                        self._log_state(output)
-                        previous_state = output.result.state
-
                     render_time = 0.0
                     should_stop = False
                     if self._display:
@@ -91,7 +104,7 @@ class DetectionPipeline:
 
                     window_frames += 1
                     window_inference_time += inference_time
-                    window_detection_time += detection_time
+                    window_analysis_time += analysis_time
                     window_render_time += render_time
                     log_time = time.perf_counter()
                     window_elapsed = log_time - window_started
@@ -103,14 +116,14 @@ class DetectionPipeline:
                             frames=window_frames,
                             elapsed=window_elapsed,
                             inference_time=window_inference_time,
-                            detection_time=window_detection_time,
+                            analysis_time=window_analysis_time,
                             render_time=window_render_time,
-                            state=output.result.state,
+                            snapshot=output.snapshot,
                         )
                         window_started = log_time
                         window_frames = 0
                         window_inference_time = 0.0
-                        window_detection_time = 0.0
+                        window_analysis_time = 0.0
                         window_render_time = 0.0
                     if should_stop:
                         break
@@ -119,7 +132,7 @@ class DetectionPipeline:
                 cv2.destroyAllWindows()
         total_elapsed = max(time.perf_counter() - run_started, 1e-6)
         LOGGER.info(
-            "Detection đã dừng sau %d frame | FPS trung bình=%.2f.",
+            "Phân tích đã dừng sau %d frame | FPS trung bình=%.2f.",
             processed_frames,
             processed_frames / total_elapsed,
         )
@@ -134,23 +147,17 @@ class DetectionPipeline:
         fps: float,
     ) -> bool:
         """Hiển thị kết quả và trả True khi người dùng yêu cầu dừng."""
-        view = render_detection_view(frame, self._baseline, output, fps)
-        cv2.imshow("Walkway detection", view)
+        if self._renderer is None:
+            raise RuntimeError("Renderer chưa được khởi tạo khi display đang bật.")
+        view = self._renderer.render(
+            frame,
+            output,
+            fps,
+            show_depth_heatmaps=self._show_depth_heatmaps,
+        )
+        cv2.imshow("Walkway measurements", view)
         key = cv2.waitKey(1) & 0xFF
         return key in (27, ord("q"), ord("Q"))
-
-    # ─────────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _log_state(output: DetectionOutput) -> None:
-        """Ghi log khi trạng thái tức thời của lối đi thay đổi."""
-        result = output.result
-        LOGGER.info(
-            "Trạng thái=%s | trống hẹp nhất=%.2f%% | vật tại nút thắt=%.2f%%",
-            result.state.value,
-            result.minimum_free_width_ratio * 100,
-            result.obstacle_width_ratio * 100,
-        )
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -159,20 +166,24 @@ class DetectionPipeline:
         frames: int,
         elapsed: float,
         inference_time: float,
-        detection_time: float,
+        analysis_time: float,
         render_time: float,
-        state: OccupancyState,
+        snapshot: CorridorSnapshot,
     ) -> None:
-        """Ghi FPS và thời gian trung bình của từng công đoạn trong một cửa sổ đo."""
+        """Ghi hiệu năng và snapshot mới nhất trong một cửa sổ thời gian."""
         frame_count = max(frames, 1)
+        performance = (
+            f"FPS={frames / max(elapsed, 1e-6):.2f} | "
+            f"inference={inference_time * 1000 / frame_count:.1f}ms | "
+            f"analysis={analysis_time * 1000 / frame_count:.1f}ms | "
+            f"render={render_time * 1000 / frame_count:.1f}ms"
+        )
         LOGGER.info(
-            "FPS=%.2f | inference=%.1fms | detection=%.1fms | "
-            "render=%.1fms | state=%s",
-            frames / max(elapsed, 1e-6),
-            inference_time * 1000 / frame_count,
-            detection_time * 1000 / frame_count,
-            render_time * 1000 / frame_count,
-            state.value,
+            "%s | bề rộng đi xuyên suốt=%.2fm/%.2fm | nút thắt Y=%.2fm",
+            performance,
+            snapshot.maximum_passable_width_meters,
+            snapshot.walkway_width_meters,
+            snapshot.bottleneck_y_meters,
         )
 
 

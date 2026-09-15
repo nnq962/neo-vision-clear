@@ -15,8 +15,8 @@ from server.models.config import RuntimeConfig
 from server.services.monitor import (
     MonitorService,
     RuntimeStartError,
-    release_runtime_memory,
 )
+from server.services.worker_resources import release_worker_memory
 from server.settings import ServerSettings
 from walkway_monitor.calibration.storage import artifact_path_for_id
 
@@ -99,7 +99,7 @@ class MonitorServiceTestCase(unittest.TestCase):
         """Tạo settings trỏ tới thư mục baseline riêng của test."""
         return ServerSettings(
             baselines_directory=str(self.baselines_directory),
-            read_timeout_ms=10,
+            worker_shutdown_timeout_seconds=3.0,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ class MonitorServiceTestCase(unittest.TestCase):
         cleanup_started = threading.Event()
         release_cleanup = threading.Event()
 
-        def slow_cleanup() -> None:
+        def slow_cleanup(_worker_name: str) -> None:
             """Giữ pha cleanup để test quan sát được trạng thái trung gian."""
             cleanup_started.set()
             release_cleanup.wait(timeout=2.0)
@@ -208,7 +208,7 @@ class MonitorServiceTestCase(unittest.TestCase):
             estimator_factory=lambda **_kwargs: object(),
             pipeline_factory=lambda **_kwargs: pipeline,
         )
-        with patch("server.services.monitor.release_runtime_memory", slow_cleanup):
+        with patch("server.services.monitor.release_worker_memory", slow_cleanup):
             service.start(self.camera, self.baseline, self.runtime)
             self.assertTrue(pipeline.started.wait(timeout=1.0))
             service.stop(wait=False)
@@ -223,11 +223,16 @@ class MonitorServiceTestCase(unittest.TestCase):
     def test_memory_cleanup_collects_python_and_cuda_cache(self) -> None:
         """Cleanup gọi GC và trả cache CUDA khi accelerator khả dụng."""
         with (
-            patch("server.services.monitor.gc.collect") as collect,
-            patch("server.services.monitor.torch.cuda.is_available", return_value=True),
-            patch("server.services.monitor.torch.cuda.empty_cache") as empty_cache,
+            patch("server.services.worker_resources.gc.collect") as collect,
+            patch(
+                "server.services.worker_resources.torch.cuda.is_available",
+                return_value=True,
+            ),
+            patch(
+                "server.services.worker_resources.torch.cuda.empty_cache"
+            ) as empty_cache,
         ):
-            release_runtime_memory()
+            release_worker_memory("runtime")
 
         collect.assert_called_once_with()
         empty_cache.assert_called_once_with()

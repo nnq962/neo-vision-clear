@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 import threading
-from typing import Callable
+import time
 
 import cv2
 import numpy as np
@@ -24,10 +24,10 @@ class DetectionPipeline:
 
     def __init__(
         self,
-        estimator   : DepthEstimator,
-        baseline    : BaselineArtifact,
-        config      : DetectionConfig,
-        display     : bool = True,
+        estimator: DepthEstimator,
+        baseline: BaselineArtifact,
+        config: DetectionConfig,
+        display: bool = True,
         show_depth_heatmaps: bool = True,
         log_interval: float = 2.0,
     ):

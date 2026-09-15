@@ -3,6 +3,7 @@ import "server-only"
 import type {
   BaselineConfig,
   CalibrationPoint,
+  CalibrationRunStatus,
 } from "@/lib/types/calibration"
 
 type BaselineApiPayload = {
@@ -93,6 +94,36 @@ function mapBaseline(payload: BaselineApiPayload): BaselineConfig {
   }
 }
 
+function mapRunStatus(value: unknown): CalibrationRunStatus | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const payload = value as Record<string, unknown>
+  const status = payload.status
+  if (
+    typeof payload.baseline_id !== "string" ||
+    (status !== "idle" &&
+      status !== "running" &&
+      status !== "completed" &&
+      status !== "failed") ||
+    typeof payload.processed_frames !== "number" ||
+    typeof payload.total_frames !== "number" ||
+    typeof payload.artifact_available !== "boolean"
+  ) return undefined
+  return {
+    baselineId: payload.baseline_id,
+    status,
+    processedFrames: payload.processed_frames,
+    totalFrames: payload.total_frames,
+    error: typeof payload.error === "string" ? payload.error : undefined,
+    artifactAvailable: payload.artifact_available,
+    noiseP99:
+      typeof payload.noise_p99 === "number" ? payload.noise_p99 : undefined,
+    alignmentMedianError:
+      typeof payload.alignment_median_error === "number"
+        ? payload.alignment_median_error
+        : undefined,
+  }
+}
+
 export async function getBaselines(): Promise<BaselineConfig[]> {
   try {
     const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
@@ -110,26 +141,36 @@ export async function getBaselines(): Promise<BaselineConfig[]> {
 export async function getBaselineArtifactAvailability(
   baselineIds: string[]
 ): Promise<Record<string, boolean>> {
+  const statuses = await getCalibrationRunStatuses(baselineIds)
+  return Object.fromEntries(
+    baselineIds.map((baselineId) => [
+      baselineId,
+      statuses[baselineId]?.artifactAvailable === true,
+    ])
+  )
+}
+
+export async function getCalibrationRunStatuses(
+  baselineIds: string[]
+): Promise<Record<string, CalibrationRunStatus>> {
   const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-  const entries = await Promise.all(
+  const statuses = await Promise.all(
     baselineIds.map(async (baselineId) => {
       try {
         const response = await fetch(
           `${apiUrl}/api/calibration/${encodeURIComponent(baselineId)}/status`,
           { cache: "no-store" }
         )
-        if (!response.ok) return [baselineId, false] as const
-        const payload: unknown = await response.json()
-        const available =
-          typeof payload === "object" &&
-          payload !== null &&
-          "artifact_available" in payload &&
-          payload.artifact_available === true
-        return [baselineId, available] as const
+        if (!response.ok) return undefined
+        return mapRunStatus(await response.json())
       } catch {
-        return [baselineId, false] as const
+        return undefined
       }
     })
   )
-  return Object.fromEntries(entries)
+  return Object.fromEntries(
+    statuses
+      .filter((status): status is CalibrationRunStatus => status !== undefined)
+      .map((status) => [status.baselineId, status])
+  )
 }

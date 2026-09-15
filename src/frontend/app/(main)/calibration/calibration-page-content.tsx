@@ -50,7 +50,7 @@ import type {
 } from "@/lib/types/calibration"
 import type { CameraIdentity } from "@/lib/types/camera"
 
-import { getCalibrationStatus, saveAndStartBaseline } from "./actions"
+import { saveAndStartBaseline } from "./actions"
 
 const FORM_ID = "calibration-form"
 const DEFAULT_WORLD_POINTS: CalibrationPoint[] = [
@@ -73,6 +73,23 @@ type CalibrationDraft = {
   inputSize: string
   processWidth: string
   worldPoints: [string, string][]
+}
+
+function isCalibrationRunStatus(
+  value: unknown
+): value is CalibrationRunStatus {
+  if (typeof value !== "object" || value === null) return false
+  const payload = value as Record<string, unknown>
+  return (
+    typeof payload.baselineId === "string" &&
+    (payload.status === "idle" ||
+      payload.status === "running" ||
+      payload.status === "completed" ||
+      payload.status === "failed") &&
+    typeof payload.processedFrames === "number" &&
+    typeof payload.totalFrames === "number" &&
+    typeof payload.artifactAvailable === "boolean"
+  )
 }
 
 function createEmptyDraft(fallbackNumber: number): CalibrationDraft {
@@ -123,21 +140,20 @@ function statusBadgeVariant(
 export function CalibrationPageContent({
   camera,
   initialBaselines,
+  initialRunStatuses,
 }: {
   camera?: CameraIdentity
   initialBaselines: BaselineConfig[]
+  initialRunStatuses: Record<string, CalibrationRunStatus>
 }) {
-  const cameraBaselines = initialBaselines.filter(
-    (baseline) => baseline.cameraId === camera?.id
-  )
-  const [baselines, setBaselines] = useState(cameraBaselines)
+  const [baselines, setBaselines] = useState(initialBaselines)
   const [draft, setDraft] = useState(() =>
-    createEmptyDraft(nextBaselineNumber(cameraBaselines))
+    createEmptyDraft(nextBaselineNumber(initialBaselines))
   )
   const workspaceRef = useRef<CalibrationCameraWorkspaceHandle>(null)
   const [runStatuses, setRunStatuses] = useState<
     Record<string, CalibrationRunStatus>
-  >({})
+  >(initialRunStatuses)
   const [pending, startTransition] = useTransition()
   const baselineIds = useMemo(
     () => baselines.map((baseline) => baseline.id),
@@ -204,53 +220,60 @@ export function CalibrationPageContent({
   }
 
   useEffect(() => {
+    if (!runningIds.length) return
+
     let cancelled = false
-    void Promise.all(
-      baselineIds.map(async (baselineId) => {
-        const result = await getCalibrationStatus(baselineId)
-        return result.status === "success" ? result.run : undefined
-      })
-    ).then((statuses) => {
+    let timer: number | undefined
+    const poll = async () => {
+      if (document.hidden) return
+      const results = await Promise.all(
+        runningIds.map(async (baselineId) => {
+          try {
+            const response = await fetch(
+              `/api/calibration/${encodeURIComponent(baselineId)}/status`,
+              { cache: "no-store" }
+            )
+            if (!response.ok) return undefined
+            const status: unknown = await response.json()
+            return isCalibrationRunStatus(status) ? status : undefined
+          } catch {
+            return undefined
+          }
+        })
+      )
       if (cancelled) return
+      for (const result of results) {
+        if (result?.status === "completed") {
+          toast.success("Calibration hoàn tất và ảnh đã sẵn sàng.")
+        } else if (result?.status === "failed") {
+          toast.error(result.error ?? "Calibration thất bại.")
+        }
+      }
       setRunStatuses((current) => {
         const next = { ...current }
-        for (const run of statuses) {
-          if (run) next[run.baselineId] = run
+        for (const result of results) {
+          if (result) {
+            next[result.baselineId] = result
+          }
         }
         return next
       })
-    })
+      timer = window.setTimeout(poll, 1000)
+    }
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (timer !== undefined) window.clearTimeout(timer)
+        return
+      }
+      timer = window.setTimeout(poll, 0)
+    }
+    timer = window.setTimeout(poll, 1000)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
     return () => {
       cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [baselineIds])
-
-  useEffect(() => {
-    if (!runningIds.length) return
-
-    const timer = window.setTimeout(() => {
-      void Promise.all(
-        runningIds.map((baselineId) => getCalibrationStatus(baselineId))
-      ).then((results) => {
-        for (const result of results) {
-          if (result.status === "success" && result.run?.status === "completed") {
-            toast.success("Calibration hoàn tất và ảnh đã sẵn sàng.")
-          } else if (result.status === "success" && result.run?.status === "failed") {
-            toast.error(result.run.error ?? "Calibration thất bại.")
-          }
-        }
-        setRunStatuses((current) => {
-          const next = { ...current }
-          for (const result of results) {
-            if (result.status === "success" && result.run) {
-              next[result.run.baselineId] = result.run
-            }
-          }
-          return next
-        })
-      })
-    }, 1000)
-    return () => window.clearTimeout(timer)
   }, [runningIds])
 
   return (
@@ -498,7 +521,10 @@ export function CalibrationPageContent({
               const imageVersion = `${run?.status ?? "idle"}-${run?.processedFrames ?? 0}`
 
               return (
-                <Card key={baseline.id}>
+                <Card
+                  key={baseline.id}
+                  className="[contain-intrinsic-size:auto_32rem] [content-visibility:auto]"
+                >
                   <CardHeader>
                     <CardTitle>{baseline.name}</CardTitle>
                     <CardDescription>

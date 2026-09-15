@@ -1,4 +1,7 @@
-import { getBaselines } from "@/lib/server/calibrations"
+import {
+  getBaselines,
+  getCalibrationRunStatuses,
+} from "@/lib/server/calibrations"
 import { getCurrentCamera } from "@/lib/server/cameras"
 
 import { CalibrationPageContent } from "./calibration-page-content"
@@ -10,12 +13,19 @@ export default async function CalibrationPage() {
     getCurrentCamera(),
     getBaselines(),
   ])
+  const cameraBaselines = baselines.filter(
+    (baseline) => baseline.cameraId === camera?.id
+  )
+  const initialRunStatuses = await getCalibrationRunStatuses(
+    cameraBaselines.map((baseline) => baseline.id)
+  )
 
   return (
     <CalibrationPageContent
-      key={baselines.map((baseline) => baseline.updatedAt).join("|")}
+      key={cameraBaselines.map((baseline) => baseline.updatedAt).join("|")}
       camera={camera ? { id: camera.id, name: camera.name } : undefined}
-      initialBaselines={baselines}
+      initialBaselines={cameraBaselines}
+      initialRunStatuses={initialRunStatuses}
     />
   )
 }

@@ -66,9 +66,17 @@ class ConfigStore:
 
     def list_cameras(self) -> list[CameraConfig]:
         """Trả danh sách rỗng hoặc camera singleton hiện tại."""
+        camera = self.get_current_camera()
+        return [camera] if camera is not None else []
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def get_current_camera(self) -> CameraConfig | None:
+        """Trả camera singleton hiện tại hoặc None khi chưa cấu hình."""
+        # Bước 1: sao chép model để caller không sửa state vừa đọc từ document.
         with self._lock:
             camera = self._read_unlocked().camera
-            return [camera.model_copy(deep=True)] if camera is not None else []
+            return camera.model_copy(deep=True) if camera is not None else None
 
     # ─────────────────────────────────────────────────────────────────────────
 

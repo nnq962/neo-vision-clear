@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useRef, useState, useTransition } from "react"
 import {
   ActivityIcon,
   GaugeIcon,
@@ -67,12 +67,11 @@ type NumberFieldProps = {
   label: string
   description: string
   name: string
-  value: number
+  defaultValue: number
   min?: number
   max?: number
   step?: number
   disabled?: boolean
-  onChange: (value: number) => void
 }
 
 function NumberField({
@@ -80,12 +79,11 @@ function NumberField({
   label,
   description,
   name,
-  value,
+  defaultValue,
   min,
   max,
   step = 1,
   disabled,
-  onChange,
 }: NumberFieldProps) {
   return (
     <div className="grid gap-2">
@@ -94,12 +92,11 @@ function NumberField({
         id={id}
         name={name}
         type="number"
-        value={value}
+        defaultValue={defaultValue}
         min={min}
         max={max}
         step={step}
         disabled={disabled}
-        onChange={(event) => onChange(Number(event.target.value))}
         required
       />
       <p className="text-xs text-muted-foreground">{description}</p>
@@ -120,6 +117,7 @@ export function RuntimeSettingsForm({
 }) {
   const [runtime, setRuntime] = useState(initialRuntime)
   const [pending, startTransition] = useTransition()
+  const formRef = useRef<HTMLFormElement>(null)
   const availableBaselines = baselines.filter(
     (baseline) => artifactAvailability[baseline.id]
   )
@@ -148,6 +146,23 @@ export function RuntimeSettingsForm({
   }
 
   function resetDefaults() {
+    const numericDefaults: Record<string, number> = {
+      snapshot_max_age_seconds: DEFAULT_RUNTIME.snapshotMaxAgeSeconds,
+      log_interval_seconds: DEFAULT_RUNTIME.logIntervalSeconds,
+      noise_multiplier: DEFAULT_RUNTIME.detection.noiseMultiplier,
+      minimum_difference: DEFAULT_RUNTIME.detection.minimumDifference,
+      display_minimum_area_ratio:
+        DEFAULT_RUNTIME.detection.displayMinimumAreaRatio,
+      depth_blur_kernel: DEFAULT_RUNTIME.detection.depthBlurKernel,
+      check_area_padding: DEFAULT_RUNTIME.detection.checkAreaPadding,
+      morphology_divisor: DEFAULT_RUNTIME.detection.morphologyDivisor,
+      alignment_inlier_ratio: DEFAULT_RUNTIME.detection.alignmentInlierRatio,
+      bev_pixels_per_meter: DEFAULT_RUNTIME.detection.bevPixelsPerMeter,
+    }
+    for (const [name, value] of Object.entries(numericDefaults)) {
+      const input = formRef.current?.elements.namedItem(name)
+      if (input instanceof HTMLInputElement) input.value = String(value)
+    }
     setRuntime((current) => ({
       ...DEFAULT_RUNTIME,
       activeBaselineId: current.activeBaselineId,
@@ -195,7 +210,7 @@ export function RuntimeSettingsForm({
         </Alert>
       )}
 
-      <form action={handleSubmit} className="grid gap-6">
+      <form ref={formRef} action={handleSubmit} className="grid gap-6">
         <input type="hidden" name="enabled" value={String(runtime.enabled)} />
         <input
           type="hidden"
@@ -276,30 +291,18 @@ export function RuntimeSettingsForm({
                 name="snapshot_max_age_seconds"
                 label="Tuổi snapshot tối đa"
                 description="Sau khoảng thời gian này, kết quả được đánh dấu là stale."
-                value={runtime.snapshotMaxAgeSeconds}
+                defaultValue={runtime.snapshotMaxAgeSeconds}
                 min={0.1}
                 step={0.1}
-                onChange={(value) =>
-                  setRuntime((current) => ({
-                    ...current,
-                    snapshotMaxAgeSeconds: value,
-                  }))
-                }
               />
               <NumberField
                 id="log-interval"
                 name="log_interval_seconds"
                 label="Chu kỳ ghi log"
                 description="Số giây giữa hai lần ghi hiệu năng; đặt 0 để tắt."
-                value={runtime.logIntervalSeconds}
+                defaultValue={runtime.logIntervalSeconds}
                 min={0}
                 step={0.1}
-                onChange={(value) =>
-                  setRuntime((current) => ({
-                    ...current,
-                    logIntervalSeconds: value,
-                  }))
-                }
               />
             </div>
           </CardContent>
@@ -321,61 +324,53 @@ export function RuntimeSettingsForm({
               name="noise_multiplier"
               label="Hệ số nhiễu"
               description="Tăng để giảm báo nhầm tại những pixel không ổn định."
-              value={runtime.detection.noiseMultiplier}
+              defaultValue={runtime.detection.noiseMultiplier}
               min={0}
               step={0.1}
-              onChange={(value) => updateDetection("noiseMultiplier", value)}
             />
             <NumberField
               id="minimum-difference"
               name="minimum_difference"
               label="Sai khác tối thiểu"
               description="Ngưỡng depth nhỏ nhất để xem là thay đổi thật."
-              value={runtime.detection.minimumDifference}
+              defaultValue={runtime.detection.minimumDifference}
               min={0.001}
               step={0.001}
-              onChange={(value) => updateDetection("minimumDifference", value)}
             />
             <NumberField
               id="minimum-area-ratio"
               name="display_minimum_area_ratio"
               label="Tỷ lệ diện tích tối thiểu"
               description="Loại các vùng thay đổi quá nhỏ so với ROI."
-              value={runtime.detection.displayMinimumAreaRatio}
+              defaultValue={runtime.detection.displayMinimumAreaRatio}
               min={0}
               max={0.999}
               step={0.001}
-              onChange={(value) =>
-                updateDetection("displayMinimumAreaRatio", value)
-              }
             />
             <NumberField
               id="blur-kernel"
               name="depth_blur_kernel"
               label="Kernel làm mượt depth"
               description="Phải là số lẻ: 3, 5, 7…"
-              value={runtime.detection.depthBlurKernel}
+              defaultValue={runtime.detection.depthBlurKernel}
               min={1}
               step={2}
-              onChange={(value) => updateDetection("depthBlurKernel", value)}
             />
             <NumberField
               id="check-padding"
               name="check_area_padding"
               label="Padding vùng kiểm tra"
               description="Số pixel mở rộng quanh ROI để làm sạch mask."
-              value={runtime.detection.checkAreaPadding}
+              defaultValue={runtime.detection.checkAreaPadding}
               min={0}
-              onChange={(value) => updateDetection("checkAreaPadding", value)}
             />
             <NumberField
               id="morphology-divisor"
               name="morphology_divisor"
               label="Ước số morphology"
               description="Điều khiển kernel morphology theo độ phân giải ảnh."
-              value={runtime.detection.morphologyDivisor}
+              defaultValue={runtime.detection.morphologyDivisor}
               min={1}
-              onChange={(value) => updateDetection("morphologyDivisor", value)}
             />
           </CardContent>
         </Card>
@@ -415,25 +410,19 @@ export function RuntimeSettingsForm({
                 name="alignment_inlier_ratio"
                 label="Tỷ lệ inlier alignment"
                 description="Phần pixel gần baseline nhất được giữ lại khi fit."
-                value={runtime.detection.alignmentInlierRatio}
+                defaultValue={runtime.detection.alignmentInlierRatio}
                 min={0.501}
                 max={1}
                 step={0.001}
-                onChange={(value) =>
-                  updateDetection("alignmentInlierRatio", value)
-                }
               />
               <NumberField
                 id="bev-pixels-per-meter"
                 name="bev_pixels_per_meter"
                 label="Pixel BEV trên mỗi mét"
                 description="Tăng để đo chi tiết hơn nhưng tốn thêm xử lý."
-                value={runtime.detection.bevPixelsPerMeter}
+                defaultValue={runtime.detection.bevPixelsPerMeter}
                 min={1}
                 step={1}
-                onChange={(value) =>
-                  updateDetection("bevPixelsPerMeter", value)
-                }
               />
             </div>
           </CardContent>

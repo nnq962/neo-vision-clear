@@ -24,15 +24,25 @@ BASELINE_ARTIFACT_FILENAMES = (
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _validate_baseline_id(baseline_id: str) -> str:
+    """Kiểm tra ID không chứa thành phần đường dẫn và trả lại giá trị hợp lệ."""
+    # Bước 1: khóa ID vào đúng một tên thư mục hoặc tên file con.
+    if not baseline_id or Path(baseline_id).name != baseline_id:
+        raise ValueError("baseline_id không hợp lệ để tạo đường dẫn artifact.")
+    return baseline_id
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def artifact_path_for_id(
     baselines_directory: str | Path,
     baseline_id: str,
 ) -> Path:
     """Tạo đường dẫn NPZ chuẩn trong thư mục riêng của một baseline."""
     # Bước 1: từ chối ID có thành phần đường dẫn để không thoát khỏi thư mục gốc.
-    if not baseline_id or Path(baseline_id).name != baseline_id:
-        raise ValueError("baseline_id không hợp lệ để tạo đường dẫn artifact.")
-    return Path(baselines_directory) / baseline_id / "baseline.npz"
+    safe_id = _validate_baseline_id(baseline_id)
+    return Path(baselines_directory) / safe_id / "baseline.npz"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -44,9 +54,8 @@ def legacy_artifact_path_for_id(
 ) -> Path:
     """Tạo đường dẫn NPZ phẳng cũ để hỗ trợ dữ liệu đã tạo trước đây."""
     # Bước 1: áp dụng cùng kiểm tra ID như cấu trúc thư mục chuẩn.
-    if not baseline_id or Path(baseline_id).name != baseline_id:
-        raise ValueError("baseline_id không hợp lệ để tạo đường dẫn artifact.")
-    return Path(baselines_directory) / f"{baseline_id}.npz"
+    safe_id = _validate_baseline_id(baseline_id)
+    return Path(baselines_directory) / f"{safe_id}.npz"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

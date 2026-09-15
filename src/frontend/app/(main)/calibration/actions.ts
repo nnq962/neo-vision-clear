@@ -288,29 +288,3 @@ export async function saveAndStartBaseline(
     run: started.run,
   }
 }
-
-export async function getCalibrationStatus(
-  baselineId: string
-): Promise<CalibrationRunResult> {
-  try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-    const response = await fetch(
-      `${apiUrl}/api/calibration/${encodeURIComponent(baselineId)}/status`,
-      { cache: "no-store" }
-    )
-    const payload: unknown = await response.json()
-    if (!response.ok) {
-      return { status: "error", message: readErrorMessage(payload) }
-    }
-    if (typeof payload !== "object" || payload === null) {
-      return { status: "error", message: "Backend trả trạng thái không hợp lệ." }
-    }
-    const run = mapRunResponse(payload as Record<string, unknown>)
-    if (!run) {
-      return { status: "error", message: "Backend trả trạng thái không hợp lệ." }
-    }
-    return { status: "success", message: "Đã tải trạng thái calibration.", run }
-  } catch {
-    return { status: "error", message: "Không kết nối được backend calibration." }
-  }
-}

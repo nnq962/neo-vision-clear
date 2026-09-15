@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from uuid import uuid4
 
 from server.models.camera import CameraCreate
 from server.services.mediamtx import MediaMtxClient, MediaMtxError
@@ -14,7 +13,7 @@ class CameraConnectionError(RuntimeError):
 
 
 class CameraConnectionTester:
-    """Dùng path tạm trên MediaMTX để xác nhận camera dùng được."""
+    """Đăng ký và xác nhận nguồn camera trên MediaMTX."""
 
     def __init__(
         self,
@@ -29,69 +28,38 @@ class CameraConnectionTester:
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def validate(self, camera: CameraCreate) -> None:
-        """Yêu cầu MediaMTX kéo source và báo path ready trước khi trả về."""
-        # Bước 1: path ngẫu nhiên tránh đụng cấu hình camera đã hoạt động.
-        source = camera.source
-        path_name = f"probe-{uuid4().hex}"
-        added = False
+    def register(self, path_name: str, camera: CameraCreate) -> None:
+        """Đăng ký camera và giữ path khi MediaMTX báo sẵn sàng."""
         try:
-            self._client.add_source_path(path_name, source)
-            added = True
-
-            # Bước 2: add config thành công chưa đủ; chỉ ready=true mới chứng
-            # minh MediaMTX đã nhận được track từ camera.
-            for attempt in range(self._attempts):
-                if attempt > 0:
-                    time.sleep(self._interval_seconds)
-                status = self._client.get_path(path_name)
-                if status is not None and status.get("ready") is True:
-                    return
-            raise CameraConnectionError("MediaMTX không nhận được luồng camera.")
-        except CameraConnectionError:
-            raise
+            # Bước 1: thêm path mới rồi xác nhận nguồn thực sự có frame.
+            self._client.add_source_path(path_name, camera.source)
+            self._wait_until_ready(path_name)
         except MediaMtxError as exc:
+            self._remove_quietly(path_name)
             raise CameraConnectionError(
                 "Không thể kiểm tra camera qua MediaMTX."
             ) from exc
-        finally:
-            # Bước 3: luôn xóa path probe, kể cả khi camera không hợp lệ.
-            if added:
-                try:
-                    self._client.delete_path(path_name)
-                except MediaMtxError:
-                    pass
+        except CameraConnectionError:
+            # Bước 2: đăng ký lỗi phải rollback path vừa thêm.
+            self._remove_quietly(path_name)
+            raise
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def register(self, path_name: str, camera: CameraCreate) -> None:
-        """Đăng ký camera và giữ path khi MediaMTX báo sẵn sàng."""
-        added = False
-        ready = False
+    def update(self, path_name: str, source: str, previous_source: str) -> None:
+        """Đổi source và tự khôi phục source cũ nếu kết nối mới thất bại."""
         try:
-            self._client.add_source_path(path_name, camera.source)
-            added = True
-            for attempt in range(self._attempts):
-                if attempt > 0:
-                    time.sleep(self._interval_seconds)
-                status = self._client.get_path(path_name)
-                if status is not None and status.get("ready") is True:
-                    ready = True
-                    return
-            raise CameraConnectionError("MediaMTX không nhận được luồng camera.")
-        except CameraConnectionError:
+            # Bước 1: cập nhật MediaMTX trước để không lưu một source chưa dùng được.
+            self._client.update_source_path(path_name, source)
+            self._wait_until_ready(path_name)
+        except (MediaMtxError, CameraConnectionError) as exc:
+            # Bước 2: rollback best-effort, nhưng vẫn trả nguyên lỗi của source mới.
+            self._restore_source_quietly(path_name, previous_source)
+            if isinstance(exc, MediaMtxError):
+                raise CameraConnectionError(
+                    "Không thể cập nhật camera qua MediaMTX."
+                ) from exc
             raise
-        except MediaMtxError as exc:
-            raise CameraConnectionError(
-                "Không thể kiểm tra camera qua MediaMTX."
-            ) from exc
-        finally:
-            # Chỉ rollback path khi đăng ký không hoàn tất.
-            if added and not ready:
-                try:
-                    self._client.delete_path(path_name)
-                except MediaMtxError:
-                    pass
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -103,3 +71,36 @@ class CameraConnectionTester:
             raise CameraConnectionError(
                 "Không thể xóa camera khỏi MediaMTX."
             ) from exc
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _wait_until_ready(self, path_name: str) -> None:
+        """Chờ MediaMTX công bố path ở trạng thái sẵn sàng."""
+        # Add hoặc patch thành công chưa đủ; path chỉ dùng được khi ready=true.
+        for attempt in range(self._attempts):
+            if attempt > 0:
+                time.sleep(self._interval_seconds)
+            status = self._client.get_path(path_name)
+            if status is not None and status.get("ready") is True:
+                return
+        raise CameraConnectionError("MediaMTX không nhận được luồng camera.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _remove_quietly(self, path_name: str) -> None:
+        """Dọn path tạm hoặc path đăng ký lỗi mà không che nguyên nhân chính."""
+        # Bước 1: cleanup best-effort; caller vẫn nhận lỗi kết nối ban đầu.
+        try:
+            self._client.delete_path(path_name)
+        except MediaMtxError:
+            pass
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _restore_source_quietly(self, path_name: str, source: str) -> None:
+        """Khôi phục source cũ mà không che lỗi cập nhật ban đầu."""
+        # Rollback chỉ cần đưa cấu hình cũ trở lại; runtime sẽ tự kết nối lại.
+        try:
+            self._client.update_source_path(path_name, source)
+        except MediaMtxError:
+            pass

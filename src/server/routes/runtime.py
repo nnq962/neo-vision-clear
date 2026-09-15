@@ -78,8 +78,8 @@ def start_runtime(
             status_code=409,
             detail="Cần chọn active_baseline_id trước khi chạy runtime.",
         )
-    cameras = store.list_cameras()
-    if not cameras:
+    camera = store.get_current_camera()
+    if camera is None:
         raise HTTPException(status_code=409, detail="Chưa có camera để chạy runtime.")
     try:
         baseline = store.get_baseline(baseline_id)
@@ -90,7 +90,7 @@ def start_runtime(
     enabled_runtime = runtime.model_copy(update={"enabled": True})
     try:
         store.update_runtime(enabled_runtime)
-        return service.start(cameras[0], baseline, enabled_runtime)
+        return service.start(camera, baseline, enabled_runtime)
     except (RuntimeBusyError, RuntimeStartError) as exc:
         # Hoàn tác cờ enabled nếu worker không nhận được lệnh start.
         store.update_runtime(runtime)

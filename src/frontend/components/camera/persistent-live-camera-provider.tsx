@@ -3,8 +3,9 @@
 import {
   createContext,
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -15,25 +16,19 @@ type CameraHost = {
   cameraName: string
 }
 
-type CameraBounds = {
-  height: number
-  left: number
-  top: number
-  width: number
-  visible: boolean
-}
-
 type PersistentLiveCameraContextValue = {
   registerHost: (host: CameraHost) => () => void
 }
 
-const HIDDEN_BOUNDS: CameraBounds = {
-  height: 0,
-  left: 0,
-  top: 0,
-  width: 0,
-  visible: false,
-}
+const WEBRTC_BASE_URL =
+  process.env.NEXT_PUBLIC_MEDIAMTX_WEBRTC_URL ?? "http://127.0.0.1:8889"
+const PLAYER_PARAMETERS = new URLSearchParams({
+  autoplay: "true",
+  controls: "false",
+  disablepictureinpicture: "true",
+  muted: "true",
+  playsinline: "true",
+}).toString()
 
 export const PersistentLiveCameraContext =
   createContext<PersistentLiveCameraContextValue | null>(null)
@@ -47,14 +42,19 @@ export function PersistentLiveCameraProvider({
   const [connectedCamera, setConnectedCamera] = useState<
     Pick<CameraHost, "cameraId" | "cameraName">
   >()
-  const [bounds, setBounds] = useState<CameraBounds>(HIDDEN_BOUNDS)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const registerHost = useCallback((nextHost: CameraHost) => {
     setHost(nextHost)
-    setConnectedCamera({
-      cameraId: nextHost.cameraId,
-      cameraName: nextHost.cameraName,
-    })
+    setConnectedCamera((current) =>
+      current?.cameraId === nextHost.cameraId &&
+      current.cameraName === nextHost.cameraName
+        ? current
+        : {
+            cameraId: nextHost.cameraId,
+            cameraName: nextHost.cameraName,
+          }
+    )
 
     return () => {
       setHost((currentHost) =>
@@ -63,8 +63,10 @@ export function PersistentLiveCameraProvider({
     }
   }, [])
 
-  useEffect(() => {
-    if (!host) {
+  useLayoutEffect(() => {
+    const iframe = iframeRef.current
+    if (!host || !iframe) {
+      if (iframe) iframe.style.visibility = "hidden"
       return
     }
 
@@ -73,13 +75,11 @@ export function PersistentLiveCameraProvider({
       window.cancelAnimationFrame(animationFrame)
       animationFrame = window.requestAnimationFrame(() => {
         const rectangle = host.element.getBoundingClientRect()
-        setBounds({
-          height: rectangle.height,
-          left: rectangle.left + window.scrollX,
-          top: rectangle.top + window.scrollY,
-          width: rectangle.width,
-          visible: rectangle.width > 0 && rectangle.height > 0,
-        })
+        iframe.style.height = `${rectangle.height}px`
+        iframe.style.transform = `translate3d(${rectangle.left + window.scrollX}px, ${rectangle.top + window.scrollY}px, 0)`
+        iframe.style.visibility =
+          rectangle.width > 0 && rectangle.height > 0 ? "visible" : "hidden"
+        iframe.style.width = `${rectangle.width}px`
       })
     }
 
@@ -99,34 +99,18 @@ export function PersistentLiveCameraProvider({
     () => ({ registerHost }),
     [registerHost]
   )
-  const webrtcBaseUrl =
-    process.env.NEXT_PUBLIC_MEDIAMTX_WEBRTC_URL ?? "http://127.0.0.1:8889"
-  const playerParameters = new URLSearchParams({
-    autoplay: "true",
-    controls: "false",
-    disablepictureinpicture: "true",
-    muted: "true",
-    playsinline: "true",
-  })
 
   return (
     <PersistentLiveCameraContext.Provider value={contextValue}>
       {children}
       {connectedCamera ? (
         <iframe
-          className="pointer-events-none absolute z-10 rounded-xl border bg-black"
-          src={`${webrtcBaseUrl}/${encodeURIComponent(connectedCamera.cameraId)}/?${playerParameters}`}
+          ref={iframeRef}
+          className="pointer-events-none absolute left-0 top-0 z-10 rounded-xl border bg-black invisible"
+          src={`${WEBRTC_BASE_URL}/${encodeURIComponent(connectedCamera.cameraId)}/?${PLAYER_PARAMETERS}`}
           title={`Video trực tiếp từ ${connectedCamera.cameraName}`}
           allow="autoplay"
           tabIndex={-1}
-          style={{
-            height: bounds.height,
-            left: bounds.left,
-            opacity: host && bounds.visible ? 1 : 0,
-            top: bounds.top,
-            visibility: host && bounds.visible ? "visible" : "hidden",
-            width: bounds.width,
-          }}
         />
       ) : null}
     </PersistentLiveCameraContext.Provider>

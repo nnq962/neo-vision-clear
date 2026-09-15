@@ -2,11 +2,47 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import cv2
 import numpy as np
 
 from walkway_monitor.models import RoiDefinition
 from walkway_monitor.ui import draw_text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _close_window(window: str) -> None:
+    """Đóng cửa sổ OpenCV theo kiểu best-effort khi UI đang thoát."""
+    # Bước 1: người dùng có thể đã đóng cửa sổ bằng window manager trước đó.
+    try:
+        cv2.destroyWindow(window)
+    except cv2.error:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@contextmanager
+def _open_window(window: str, error_message: str) -> Iterator[None]:
+    """Mở cửa sổ OpenCV và bảo đảm đóng nó khi rời khỏi context."""
+    # Bước 1: chuyển lỗi môi trường headless thành thông báo nghiệp vụ rõ ràng.
+    try:
+        cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    except cv2.error as exc:
+        raise RuntimeError(error_message) from exc
+    try:
+        yield
+    finally:
+        # Bước 2: cleanup cũng chạy khi người dùng hủy hoặc render phát sinh lỗi.
+        _close_window(window)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def normalize_polygon(points: np.ndarray, width: int, height: int) -> RoiDefinition:
@@ -63,56 +99,53 @@ def select_polygon(frame: np.ndarray) -> RoiDefinition:
         elif event == cv2.EVENT_RBUTTONDOWN and points:
             points.pop()
 
-    try:
-        cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    with _open_window(
+        window,
+        "Không thể mở cửa sổ chọn ROI trong môi trường hiện tại.",
+    ):
         cv2.setMouseCallback(window, on_mouse)
-    except cv2.error as exc:
-        raise RuntimeError("Không thể mở cửa sổ chọn ROI trong môi trường hiện tại.") from exc
-
-    while True:
-        canvas = frame.copy()
-        if points:
-            pixel_points = np.asarray(points, dtype=np.int32)
-            cv2.polylines(
-                canvas,
-                [pixel_points],
-                len(points) >= 3,
-                (0, 255, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            for index, point in enumerate(points):
-                cv2.circle(canvas, point, 5, (0, 255, 255), -1, cv2.LINE_AA)
-                cv2.putText(
+        while True:
+            canvas = frame.copy()
+            if points:
+                pixel_points = np.asarray(points, dtype=np.int32)
+                cv2.polylines(
                     canvas,
-                    str(index + 1),
-                    (point[0] + 7, point[1] - 7),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
+                    [pixel_points],
+                    len(points) >= 3,
                     (0, 255, 255),
-                    1,
+                    2,
                     cv2.LINE_AA,
                 )
-        canvas = draw_text(
-            canvas,
-            "Trái: thêm | Phải/Backspace: xóa | Enter: xong | C: vẽ lại",
-            (15, 8),
-            font_size=21,
-            color=(255, 255, 255),
-        )
-        cv2.imshow(window, canvas)
-        key = cv2.waitKey(20) & 0xFF
-        if key in (10, 13) and len(points) >= 3:
-            break
-        if key in (8, 127) and points:
-            points.pop()
-        elif key in (ord("c"), ord("C")):
-            points.clear()
-        elif key in (27, ord("q"), ord("Q")):
-            cv2.destroyWindow(window)
-            raise KeyboardInterrupt("Đã hủy chọn ROI.")
+                for index, point in enumerate(points):
+                    cv2.circle(canvas, point, 5, (0, 255, 255), -1, cv2.LINE_AA)
+                    cv2.putText(
+                        canvas,
+                        str(index + 1),
+                        (point[0] + 7, point[1] - 7),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+            canvas = draw_text(
+                canvas,
+                "Trái: thêm | Phải/Backspace: xóa | Enter: xong | C: vẽ lại",
+                (15, 8),
+                font_size=21,
+                color=(255, 255, 255),
+            )
+            cv2.imshow(window, canvas)
+            key = cv2.waitKey(20) & 0xFF
+            if key in (10, 13) and len(points) >= 3:
+                break
+            if key in (8, 127) and points:
+                points.pop()
+            elif key in (ord("c"), ord("C")):
+                points.clear()
+            elif key in (27, ord("q"), ord("Q")):
+                raise KeyboardInterrupt("Đã hủy chọn ROI.")
 
-    cv2.destroyWindow(window)
     height, width = frame.shape[:2]
     return normalize_polygon(np.asarray(points, dtype=np.float32), width, height)
 
@@ -131,13 +164,14 @@ def wait_for_empty_confirmation(frame: np.ndarray, roi: RoiDefinition) -> None:
         font_size=22,
         color=(0, 255, 255),
     )
-    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
-    while True:
-        cv2.imshow(window, canvas)
-        key = cv2.waitKey(20) & 0xFF
-        if key in (10, 13, 32):
-            cv2.destroyWindow(window)
-            return
-        if key in (27, ord("q"), ord("Q")):
-            cv2.destroyWindow(window)
-            raise KeyboardInterrupt("Đã hủy calibration.")
+    with _open_window(
+        window,
+        "Không thể mở cửa sổ xác nhận ROI trong môi trường hiện tại.",
+    ):
+        while True:
+            cv2.imshow(window, canvas)
+            key = cv2.waitKey(20) & 0xFF
+            if key in (10, 13, 32):
+                return
+            if key in (27, ord("q"), ord("Q")):
+                raise KeyboardInterrupt("Đã hủy calibration.")

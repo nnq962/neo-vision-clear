@@ -21,6 +21,8 @@ def fit_affine_alignment(
         raise ValueError("Depth map phải là mảng hai chiều.")
     if support_mask is not None and support_mask.shape != current.shape:
         raise ValueError("support_mask phải cùng kích thước với depth map.")
+    if max_samples < 2:
+        raise ValueError("max_samples phải lớn hơn hoặc bằng 2.")
     if not 0.5 < inlier_ratio <= 1.0:
         raise ValueError("inlier_ratio phải nằm trong (0.5, 1].")
     if iterations < 1:

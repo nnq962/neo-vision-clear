@@ -1,7 +1,5 @@
-"use client"
-
-import * as React from "react"
 import Link from "next/link"
+import type { ComponentProps } from "react"
 import {
   CameraIcon,
   ChartNoAxesCombinedIcon,
@@ -45,7 +43,7 @@ const data = {
   ],
 }
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar variant="inset" {...props}>
       <SidebarHeader>

@@ -35,7 +35,7 @@ import { Separator } from "@/components/ui/separator"
 import type { CameraIdentity } from "@/lib/types/camera"
 import type { RuntimeProcessStatus } from "@/lib/types/runtime"
 
-import { refreshRuntimeStatus, startRuntime, stopRuntime } from "./actions"
+import { startRuntime, stopRuntime } from "./actions"
 
 type ActiveBaseline = {
   id: string
@@ -103,6 +103,18 @@ function formatAge(ageMs: number | undefined): string {
   if (ageMs === undefined) return "Chưa có dữ liệu"
   if (ageMs < 1000) return `${ageMs} ms trước`
   return `${(ageMs / 1000).toFixed(1)} giây trước`
+}
+
+function isRuntimeProcessStatus(value: unknown): value is RuntimeProcessStatus {
+  if (typeof value !== "object" || value === null) return false
+  const status = (value as Record<string, unknown>).status
+  return (
+    status === "stopped" ||
+    status === "starting" ||
+    status === "running" ||
+    status === "stopping" ||
+    status === "failed"
+  )
 }
 
 function parseCorridorReading(value: unknown): CorridorReading | undefined {
@@ -250,10 +262,30 @@ export function OverviewDashboard({
   }
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      void refreshRuntimeStatus().then(setProcessStatus)
-    }, 1000)
-    return () => window.clearInterval(timer)
+    let requestInFlight = false
+    const refresh = async () => {
+      if (document.hidden || requestInFlight) return
+      requestInFlight = true
+      try {
+        const response = await fetch("/api/runtime/status", {
+          cache: "no-store",
+        })
+        if (!response.ok) return
+        const status: unknown = await response.json()
+        if (isRuntimeProcessStatus(status)) setProcessStatus(status)
+      } finally {
+        requestInFlight = false
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (!document.hidden) void refresh()
+    }
+    const timer = window.setInterval(refresh, 2500)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
   }, [])
 
   useEffect(() => {
@@ -275,7 +307,11 @@ export function OverviewDashboard({
         setConnection("open")
         setReading({ status: "warming_up" })
         const requestSnapshot = () => {
-          if (socket?.readyState !== WebSocket.OPEN) return
+          if (
+            document.hidden ||
+            socket?.readyState !== WebSocket.OPEN ||
+            socket.bufferedAmount > 0
+          ) return
           socket.send(
             JSON.stringify({
               type: "get_overview_info",
@@ -422,7 +458,7 @@ export function OverviewDashboard({
                   ) : null}
                   {visibleZones.map((zone, index) => (
                     <polygon
-                      key={`${reading.data?.frameIndex}-${index}`}
+                      key={index}
                       points={zone.polygon
                         .map(([xValue, yValue]) => `${xValue},${yValue}`)
                         .join(" ")}

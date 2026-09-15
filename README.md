@@ -206,15 +206,17 @@ gây hiểu nhầm. Camera phải giữ nguyên vị trí.
 
 ## FastAPI server và WebSocket
 
-Package `server` nằm độc lập với `walkway_monitor`. FastAPI lifespan nạp model,
-mở nguồn camera khi startup và yêu cầu worker dừng khi shutdown. Cấu hình server
-được đọc từ các biến môi trường `WALKWAY_*`:
+Package `server` nằm độc lập với `walkway_monitor`. FastAPI chỉ khởi tạo các
+service khi startup; camera và model được mở sau qua API runtime. Cấu hình hạ
+tầng của server được đọc từ biến môi trường:
 
 ```bash
-WALKWAY_SOURCE='rtsp://user:password@camera/stream' \
-WALKWAY_BASELINE='data/baselines/default/baseline.npz' \
+NVC_CONFIG_PATH='data/config.json' \
+NVC_BASELINES_PATH='data/baselines' \
+MEDIAMTX_RTSP_URL='rtsp://127.0.0.1:8554' \
 WALKWAY_HOST='0.0.0.0' \
 WALKWAY_PORT='8000' \
+WALKWAY_WORKER_SHUTDOWN_TIMEOUT_SECONDS='7' \
 uv run walkway-server
 ```
 

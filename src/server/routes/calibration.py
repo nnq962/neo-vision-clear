@@ -50,8 +50,8 @@ def create_baseline(
 ) -> CalibrationResponse:
     """Validate và thêm baseline mới mà không khởi chạy calibration."""
     # Bước 1: calibration luôn gắn với camera singleton đang được cấu hình.
-    cameras = store.list_cameras()
-    if not cameras:
+    camera = store.get_current_camera()
+    if camera is None:
         raise HTTPException(
             status_code=409,
             detail="Cần lưu camera trước khi lưu cấu hình calibration.",
@@ -59,7 +59,7 @@ def create_baseline(
 
     # Bước 2: chỉ ghi JSON; pipeline và model không được gọi tại endpoint này.
     try:
-        return store.create_baseline(cameras[0].id, payload).to_response()
+        return store.create_baseline(camera.id, payload).to_response()
     except BaselineNameConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

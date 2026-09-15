@@ -28,8 +28,8 @@ router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 def list_cameras(
     store: Annotated[ConfigStore, Depends(get_config_store)],
 ) -> list[CameraResponse]:
-    """Trả toàn bộ camera mà không công bố mật khẩu."""
-    # Chuyển từng bản ghi nội bộ thành schema công khai.
+    """Trả camera singleton hiện tại dưới dạng danh sách tương thích API."""
+    # Response giữ source để form có thể chỉnh sửa cấu hình camera hiện tại.
     return [camera.to_response() for camera in store.list_cameras()]
 
 
@@ -47,8 +47,7 @@ def create_camera(
 ) -> CameraResponse:
     """Đăng ký MediaMTX rồi lưu camera khi path đã sẵn sàng."""
     # Ghi nhớ path cũ để dọn sau khi camera mới đã sẵn sàng và lưu thành công.
-    current_cameras = store.list_cameras()
-    current_camera = current_cameras[0] if current_cameras else None
+    current_camera = store.get_current_camera()
 
     # ID dùng chung cho JSON và path WebRTC của MediaMTX.
     camera_id = uuid4().hex[:12]
@@ -79,7 +78,7 @@ def get_camera(
     camera_id: str,
     store: Annotated[ConfigStore, Depends(get_config_store)],
 ) -> CameraResponse:
-    """Trả một camera theo ID mà không công bố mật khẩu."""
+    """Trả cấu hình camera theo ID để frontend chỉnh sửa."""
     try:
         return store.get_camera(camera_id).to_response()
     except CameraNotFoundError as exc:
@@ -94,13 +93,36 @@ def update_camera(
     camera_id: str,
     payload: CameraUpdate,
     store: Annotated[ConfigStore, Depends(get_config_store)],
+    tester: Annotated[
+        CameraConnectionTester,
+        Depends(get_camera_connection_tester),
+    ],
 ) -> CameraResponse:
-    """Cập nhật từng phần một cấu hình camera."""
+    """Cập nhật camera đồng bộ giữa MediaMTX và tệp cấu hình."""
     try:
-        return store.update_camera(camera_id, payload).to_response()
+        # Bước 1: chỉ kết nối lại MediaMTX khi URL nguồn thực sự thay đổi.
+        current_camera = store.get_camera(camera_id)
+        source_changed = (
+            payload.source is not None and payload.source != current_camera.source
+        )
+        if source_changed:
+            tester.update(camera_id, payload.source, current_camera.source)
+
+        # Bước 2: MediaMTX đã chấp nhận source thì mới ghi JSON.
+        try:
+            updated = store.update_camera(camera_id, payload)
+        except Exception:
+            if source_changed:
+                # JSON lỗi phải đưa MediaMTX về source cũ để tránh lệch trạng thái.
+                try:
+                    tester.update(camera_id, current_camera.source, payload.source)
+                except CameraConnectionError:
+                    pass
+            raise
+        return updated.to_response()
     except CameraNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CameraValidationError as exc:
+    except (CameraConnectionError, CameraValidationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

@@ -3,9 +3,30 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def validate_camera_source(source: str) -> str:
+    """Xác nhận source là một URL RTSP hoặc RTMP hoàn chỉnh."""
+    # Credentials được phép nằm trực tiếp trong URL để form chỉ có một ô.
+    parsed = urlsplit(source)
+    valid_schemes = {"rtsp", "rtsps", "rtmp", "rtmps"}
+    if parsed.scheme not in valid_schemes or not parsed.hostname:
+        raise ValueError("Camera cần URL RTSP hoặc RTMP hợp lệ.")
+    return source
+
+
+CameraSource = Annotated[
+    str,
+    Field(min_length=1, max_length=2048),
+    AfterValidator(validate_camera_source),
+]
 
 
 class CameraFields(BaseModel):
@@ -14,21 +35,9 @@ class CameraFields(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=100)
-    source: str = Field(min_length=1, max_length=2048)
+    source: CameraSource
     open_timeout_ms: int = Field(default=5000, ge=0, le=120_000)
     read_timeout_ms: int = Field(default=5000, ge=0, le=120_000)
-
-    # ─────────────────────────────────────────────────────────────────────────
-
-    @model_validator(mode="after")
-    def validate_source(self) -> "CameraFields":
-        """Yêu cầu một URL RTSP hoặc RTMP hoàn chỉnh."""
-        # Credentials được phép nằm trực tiếp trong URL để form chỉ có một ô.
-        parsed = urlsplit(self.source)
-        valid_schemes = {"rtsp", "rtsps", "rtmp", "rtmps"}
-        if parsed.scheme not in valid_schemes or not parsed.hostname:
-            raise ValueError("Camera cần URL RTSP hoặc RTMP hợp lệ.")
-        return self
 
 
 class CameraCreate(CameraFields):
@@ -41,7 +50,7 @@ class CameraUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    source: str | None = Field(default=None, min_length=1, max_length=2048)
+    source: CameraSource | None = None
     open_timeout_ms: int | None = Field(default=None, ge=0, le=120_000)
     read_timeout_ms: int | None = Field(default=None, ge=0, le=120_000)
 
@@ -115,15 +124,5 @@ class CameraConfig(CameraFields):
         return CameraResponse.model_validate(self.model_dump())
 
 
-class CameraResponse(BaseModel):
+class CameraResponse(CameraConfig):
     """Thông tin camera được trả về client."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    name: str
-    source: str
-    open_timeout_ms: int
-    read_timeout_ms: int
-    created_at: datetime
-    updated_at: datetime

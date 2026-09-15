@@ -47,6 +47,21 @@ class MediaMtxClient:
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def update_source_path(self, path_name: str, source: str) -> None:
+        """Đổi source của path hiện có và yêu cầu kết nối lại ngay."""
+        # API patch giữ nguyên các tùy chọn path không thuộc phạm vi ứng dụng.
+        self._request(
+            f"/config/paths/patch/{quote(path_name, safe='')}",
+            method="PATCH",
+            payload={
+                "source": source,
+                "sourceProtocol": "tcp",
+                "sourceOnDemand": False,
+            },
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def get_path(self, path_name: str) -> dict[str, object] | None:
         """Trả trạng thái runtime của path hoặc None khi path chưa xuất hiện."""
         try:

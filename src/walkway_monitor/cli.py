@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from utils.logger import LOGGER
 from walkway_monitor.calibration.pipeline import CalibrationPipeline
 from walkway_monitor.calibration.storage import load_baseline
 from walkway_monitor.config import (
     DEFAULT_BASELINE_PATH,
+    SUPPORTED_ENCODERS,
     CalibrationConfig,
     DetectionConfig,
+    default_checkpoint_path,
 )
 from walkway_monitor.depth.estimator import DepthAnythingEstimator
 from walkway_monitor.detection.pipeline import DetectionPipeline
@@ -40,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibration_parser.add_argument(
         "--encoder",
         default="vits",
-        choices=("vits", "vitb", "vitl"),
+        choices=SUPPORTED_ENCODERS,
     )
     calibration_parser.add_argument("--frames", type=int, default=60)
     calibration_parser.add_argument("--input-size", type=int, default=518)
@@ -129,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def parse_source(value: str):
+def parse_source(value: str) -> str | int:
     """Chuyển chuỗi chỉ gồm chữ số thành webcam index, giữ nguyên URL và path."""
     return int(value) if value.isdigit() else value
 
@@ -146,9 +147,7 @@ def run_calibration(args: argparse.Namespace) -> int:
         encoder=args.encoder,
     )
     config.validate()
-    checkpoint = args.checkpoint or str(
-        Path("weights") / f"depth_anything_v2_{args.encoder}.pth"
-    )
+    checkpoint = args.checkpoint or default_checkpoint_path(args.encoder)
     estimator = DepthAnythingEstimator(
         checkpoint=checkpoint,
         encoder=args.encoder,
@@ -184,9 +183,7 @@ def run_detection(args: argparse.Namespace) -> int:
         display_minimum_area_ratio=args.display_minimum_area_ratio,
     )
     config.validate()
-    checkpoint = args.checkpoint or str(
-        Path("weights") / f"depth_anything_v2_{baseline.encoder}.pth"
-    )
+    checkpoint = args.checkpoint or default_checkpoint_path(baseline.encoder)
     estimator = DepthAnythingEstimator(
         checkpoint=checkpoint,
         encoder=baseline.encoder,

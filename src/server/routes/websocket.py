@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from server.dependencies import get_monitor_service
-from server.models import (
+from server.models.messages import (
     CorridorInfoData,
     CorridorInfoRequest,
     CorridorInfoResponse,
@@ -17,6 +17,8 @@ from server.models import (
     OverviewInfoRequest,
     OverviewInfoResponse,
     ProtocolErrorResponse,
+    SnapshotRequest,
+    SnapshotResponse,
 )
 from server.services.monitor import MonitorService
 
@@ -27,43 +29,55 @@ router = APIRouter(tags=["websocket"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@router.websocket("/ws/corridor")
-async def corridor_websocket(
+def _request_id_from_payload(payload: object) -> str | None:
+    """Lấy request ID an toàn từ message chưa được Pydantic xác thực."""
+    # Bước 1: chỉ phản chiếu chuỗi hợp lệ để response lỗi không mang object lạ.
+    if not isinstance(payload, dict):
+        return None
+    request_id = payload.get("request_id")
+    return request_id if isinstance(request_id, str) else None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _serve_snapshots(
     websocket: WebSocket,
-    service: Annotated[MonitorService, Depends(get_monitor_service)],
+    service: MonitorService,
+    request_model: type[SnapshotRequest],
+    response_model: type[SnapshotResponse],
+    include_zones: bool,
 ) -> None:
-    """Nhận yêu cầu và trả snapshot hiện tại trên cùng kết nối WebSocket."""
+    """Phục vụ vòng lặp protocol chung cho mọi loại snapshot WebSocket."""
     await websocket.accept()
     try:
         while True:
-            # Bước 1: nhận và kiểm tra message trước khi truy cập snapshot.
+            # Bước 1: xác thực message và giữ kết nối mở khi client gửi sai.
             payload = None
             try:
                 payload = await websocket.receive_json()
-                request = CorridorInfoRequest.model_validate(payload)
+                request = request_model.model_validate(payload)
             except (json.JSONDecodeError, ValidationError, TypeError) as exc:
-                request_id = (
-                    payload.get("request_id")
-                    if isinstance(payload, dict)
-                    and isinstance(payload.get("request_id"), str)
-                    else None
-                )
                 response = ProtocolErrorResponse(
-                    request_id=request_id,
+                    request_id=_request_id_from_payload(payload),
                     error=str(exc),
                 )
                 await websocket.send_json(response.model_dump(mode="json"))
                 continue
 
-            # Bước 2: đọc atomically snapshot và giữ nguyên request_id để robot
-            # ghép response với request khi có nhiều yêu cầu nối tiếp.
+            # Bước 2: đọc snapshot đúng một lần để data, zone và age đồng bộ.
             reading = service.read_snapshot()
-            data = (
-                CorridorInfoData.from_snapshot(reading.snapshot)
-                if reading.snapshot is not None
-                else None
-            )
-            response = CorridorInfoResponse(
+            data = None
+            if reading.snapshot is not None:
+                data = (
+                    OverviewInfoData.from_snapshot(
+                        reading.snapshot,
+                        reading.difference_zones,
+                    )
+                    if include_zones
+                    else CorridorInfoData.from_snapshot(reading.snapshot)
+                )
+            response = response_model(
                 request_id=request.request_id,
                 status=reading.status,
                 age_ms=reading.age_ms,
@@ -72,8 +86,26 @@ async def corridor_websocket(
             )
             await websocket.send_json(response.model_dump(mode="json"))
     except WebSocketDisconnect:
-        # Client chủ động ngắt kết nối là kết thúc bình thường của session.
+        # Client rời trang hoặc đóng kết nối là kết thúc bình thường của session.
         return
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.websocket("/ws/corridor")
+async def corridor_websocket(
+    websocket: WebSocket,
+    service: Annotated[MonitorService, Depends(get_monitor_service)],
+) -> None:
+    """Trả snapshot phép đo gọn nhẹ cho robot trên kết nối WebSocket."""
+    await _serve_snapshots(
+        websocket,
+        service,
+        CorridorInfoRequest,
+        CorridorInfoResponse,
+        include_zones=False,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -85,46 +117,10 @@ async def overview_websocket(
     service: Annotated[MonitorService, Depends(get_monitor_service)],
 ) -> None:
     """Trả snapshot kèm polygon sai khác cho dashboard frontend."""
-    await websocket.accept()
-    try:
-        while True:
-            # Bước 1: endpoint visualization dùng message type riêng với robot.
-            payload = None
-            try:
-                payload = await websocket.receive_json()
-                request = OverviewInfoRequest.model_validate(payload)
-            except (json.JSONDecodeError, ValidationError, TypeError) as exc:
-                request_id = (
-                    payload.get("request_id")
-                    if isinstance(payload, dict)
-                    and isinstance(payload.get("request_id"), str)
-                    else None
-                )
-                response = ProtocolErrorResponse(
-                    request_id=request_id,
-                    error=str(exc),
-                )
-                await websocket.send_json(response.model_dump(mode="json"))
-                continue
-
-            # Bước 2: số đo và zone được đọc từ cùng một lần publish atomically.
-            reading = service.read_snapshot()
-            data = (
-                OverviewInfoData.from_snapshot(
-                    reading.snapshot,
-                    reading.difference_zones,
-                )
-                if reading.snapshot is not None
-                else None
-            )
-            response = OverviewInfoResponse(
-                request_id=request.request_id,
-                status=reading.status,
-                age_ms=reading.age_ms,
-                data=data,
-                error=reading.error,
-            )
-            await websocket.send_json(response.model_dump(mode="json"))
-    except WebSocketDisconnect:
-        # Frontend đóng trang hoặc runtime dừng là kết thúc kết nối bình thường.
-        return
+    await _serve_snapshots(
+        websocket,
+        service,
+        OverviewInfoRequest,
+        OverviewInfoResponse,
+        include_zones=True,
+    )

@@ -82,8 +82,10 @@ class RoiDefinition:
 
     def to_mask(self, width: int, height: int) -> np.ndarray:
         """Tạo mask uint8 có giá trị 255 bên trong polygon ROI."""
+        # Bước 1: xác thực kích thước qua cùng phép đổi điểm trước khi cấp phát.
+        points = self.to_pixel_points(width, height)
         mask = np.zeros((height, width), dtype=np.uint8)
-        cv2.fillPoly(mask, [self.to_pixel_points(width, height)], 255)
+        cv2.fillPoly(mask, [points], 255)
         return mask
 
 

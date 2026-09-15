@@ -4,17 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
-import gc
 from pathlib import Path
 import threading
 from typing import Literal
-
-import torch
 
 from server.models.calibration import CalibrationConfig
 from server.models.camera import CameraConfig
 from server.models.config import RuntimeConfig, RuntimeProcessResponse
 from server.services.snapshot_store import SnapshotRead, SnapshotStore
+from server.services.worker_resources import release_worker_memory
 from server.settings import ServerSettings
 from utils.logger import LOGGER
 from walkway_monitor.calibration.storage import (
@@ -22,6 +20,7 @@ from walkway_monitor.calibration.storage import (
     legacy_artifact_path_for_id,
     load_baseline,
 )
+from walkway_monitor.config import default_checkpoint_path
 from walkway_monitor.depth.estimator import DepthAnythingEstimator, DepthEstimator
 from walkway_monitor.detection.models import DetectionOutput
 from walkway_monitor.detection.pipeline import DetectionPipeline
@@ -39,23 +38,6 @@ class RuntimeBusyError(RuntimeError):
 
 class RuntimeStartError(RuntimeError):
     """Báo lỗi cấu hình khiến runtime chưa thể bắt đầu."""
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def release_runtime_memory() -> None:
-    """Thu gom object không còn dùng và trả CUDA cache về driver nếu có."""
-    # Bước 1: giải phóng các vòng tham chiếu Python sau khi worker bỏ model.
-    gc.collect()
-
-    # Bước 2: CPU-only không cần gọi API CUDA; lỗi cleanup không được giết server.
-    if not torch.cuda.is_available():
-        return
-    try:
-        torch.cuda.empty_cache()
-    except Exception:
-        LOGGER.warning("Không thể giải phóng CUDA cache của runtime.", exc_info=True)
 
 
 class MonitorService:
@@ -140,8 +122,7 @@ class MonitorService:
 
         # Bước 2: API dùng wait=False nên không bị giữ bởi camera hoặc inference.
         if wait:
-            timeout = max(self.settings.read_timeout_ms / 1000 + 2.0, 3.0)
-            thread.join(timeout=timeout)
+            thread.join(timeout=self.settings.worker_shutdown_timeout_seconds)
             if thread.is_alive():
                 LOGGER.warning("Worker runtime chưa dừng trước khi hết timeout.")
         return response
@@ -174,8 +155,9 @@ class MonitorService:
         try:
             # Bước 1: toàn bộ thao tác nặng được thực hiện ngoài request FastAPI.
             baseline = load_baseline(artifact_path)
-            checkpoint = self.settings.checkpoint_path or str(
-                Path("weights") / f"depth_anything_v2_{baseline.encoder}.pth"
+            checkpoint = (
+                self.settings.checkpoint_path
+                or default_checkpoint_path(baseline.encoder)
             )
             estimator = self._estimator_factory(
                 checkpoint=checkpoint,
@@ -235,7 +217,7 @@ class MonitorService:
             pipeline = None
             estimator = None
             baseline = None
-            release_runtime_memory()
+            release_worker_memory("runtime")
 
             # Bước 5: chỉ công bố stopped sau khi camera, model và cache đã dọn.
             with self._lock:

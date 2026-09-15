@@ -12,6 +12,7 @@ import numpy as np
 
 from server.models.calibration import CalibrationRunResponse
 from server.services.config_store import ConfigStore
+from server.services.worker_resources import release_worker_memory
 from server.settings import ServerSettings
 from utils.logger import LOGGER
 from walkway_monitor.calibration.pipeline import CalibrationPipeline
@@ -20,7 +21,10 @@ from walkway_monitor.calibration.storage import (
     delete_artifacts_for_id,
     legacy_artifact_path_for_id,
 )
-from walkway_monitor.config import CalibrationConfig as PipelineCalibrationConfig
+from walkway_monitor.config import (
+    CalibrationConfig as PipelineCalibrationConfig,
+    default_checkpoint_path,
+)
 from walkway_monitor.depth.estimator import DepthAnythingEstimator, DepthEstimator
 from walkway_monitor.models import RoiDefinition, WorldCoordinates
 
@@ -80,13 +84,11 @@ class CalibrationService:
         """Khởi động calibration headless và trả trạng thái ban đầu."""
         # Bước 1: sao chép cấu hình trước khi chiếm slot worker.
         baseline = self.config_store.get_baseline(baseline_id)
-        cameras = self.config_store.list_cameras()
-        if not cameras or cameras[0].id != baseline.camera_id:
+        camera = self.config_store.get_current_camera()
+        if camera is None or camera.id != baseline.camera_id:
             raise CalibrationCameraError(
                 "Baseline không thuộc camera hiện tại; hãy tạo baseline mới."
             )
-        camera = cameras[0]
-
         with self._lock:
             # Bước 2: MVP chỉ cho một model calibration chạy để tránh tranh GPU.
             if self._thread is not None and self._thread.is_alive():
@@ -146,8 +148,7 @@ class CalibrationService:
         thread = self._thread
         if thread is not None and thread.is_alive():
             # Bước 1: chờ có giới hạn vì đọc camera có thể đang block theo timeout.
-            timeout = max(self.settings.read_timeout_ms / 1000 + 2.0, 3.0)
-            thread.join(timeout=timeout)
+            thread.join(timeout=self.settings.worker_shutdown_timeout_seconds)
             if thread.is_alive():
                 LOGGER.warning("Calibration worker chưa dừng trước khi hết timeout.")
 
@@ -202,6 +203,8 @@ class CalibrationService:
         read_timeout_ms: int,
     ) -> None:
         """Nạp model, chạy pipeline headless và cập nhật kết quả worker."""
+        estimator = None
+        pipeline = None
         try:
             # Bước 1: chuyển cấu hình API thành các model miền calibration.
             config = PipelineCalibrationConfig(
@@ -220,8 +223,9 @@ class CalibrationService:
                     y_axis=baseline.y_axis,
                 ),
             )
-            checkpoint = self.settings.checkpoint_path or str(
-                Path("weights") / f"depth_anything_v2_{baseline.encoder}.pth"
+            checkpoint = (
+                self.settings.checkpoint_path
+                or default_checkpoint_path(baseline.encoder)
             )
             estimator = self._estimator_factory(
                 checkpoint=checkpoint,
@@ -262,6 +266,11 @@ class CalibrationService:
                 state.status = "failed"
                 state.error = str(exc)
                 state.completed_at = datetime.now(timezone.utc)
+        finally:
+            # Bước 4: bỏ model/pipeline rồi trả CUDA cache như worker runtime.
+            pipeline = None
+            estimator = None
+            release_worker_memory("calibration")
 
     # ─────────────────────────────────────────────────────────────────────────
 

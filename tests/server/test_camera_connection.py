@@ -1,4 +1,4 @@
-"""Kiểm thử quy trình xác nhận camera qua MediaMTX path tạm."""
+"""Kiểm thử quy trình đăng ký camera qua MediaMTX."""
 
 import unittest
 
@@ -16,6 +16,7 @@ class FakeMediaMtxClient:
         """Khởi tạo chuỗi trạng thái và danh sách path được thao tác."""
         self.ready_states = ready_states
         self.added: list[tuple[str, str]] = []
+        self.updated: list[tuple[str, str]] = []
         self.deleted: list[str] = []
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -33,13 +34,19 @@ class FakeMediaMtxClient:
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def update_source_path(self, path_name: str, source: str) -> None:
+        """Ghi nhận lần đổi source hoặc rollback source."""
+        self.updated.append((path_name, source))
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def delete_path(self, path_name: str, ignore_missing: bool = True) -> None:
         """Ghi nhận path probe đã được cleanup."""
         self.deleted.append(path_name)
 
 
 class CameraConnectionTesterTestCase(unittest.TestCase):
-    """Xác nhận tester gửi nguyên URL, chờ ready và luôn cleanup."""
+    """Xác nhận tester gửi nguyên URL, chờ ready và rollback khi lỗi."""
 
     def setUp(self) -> None:
         """Tạo payload RTSP dùng chung cho từng test."""
@@ -48,25 +55,8 @@ class CameraConnectionTesterTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def test_waits_until_path_is_ready_and_removes_probe(self) -> None:
-        """Tester phải chờ ready, giữ nguyên URL và cleanup path."""
-        client = FakeMediaMtxClient([False, True])
-        tester = CameraConnectionTester(
-            client=client,
-            attempts=2,
-            interval_seconds=0,
-        )
-
-        tester.validate(self.camera)
-
-        path_name, runtime_source = client.added[0]
-        self.assertEqual(runtime_source, self.source)
-        self.assertEqual(client.deleted, [path_name])
-
-    # ─────────────────────────────────────────────────────────────────────────
-
     def test_rejects_source_that_never_becomes_ready(self) -> None:
-        """Path không ready phải phát sinh lỗi và vẫn được xóa khỏi MediaMTX."""
+        """Path không ready phải phát sinh lỗi và được rollback khỏi MediaMTX."""
         client = FakeMediaMtxClient([False])
         tester = CameraConnectionTester(
             client=client,
@@ -75,9 +65,9 @@ class CameraConnectionTesterTestCase(unittest.TestCase):
         )
 
         with self.assertRaises(CameraConnectionError):
-            tester.validate(self.camera)
+            tester.register("camera-01", self.camera)
 
-        self.assertEqual(client.deleted, [client.added[0][0]])
+        self.assertEqual(client.deleted, ["camera-01"])
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -94,6 +84,43 @@ class CameraConnectionTesterTestCase(unittest.TestCase):
 
         self.assertEqual(client.added, [("camera-01", self.source)])
         self.assertEqual(client.deleted, [])
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_update_keeps_new_source_when_it_becomes_ready(self) -> None:
+        """Source mới ready phải được giữ lại mà không rollback."""
+        client = FakeMediaMtxClient([True])
+        tester = CameraConnectionTester(
+            client=client,
+            attempts=1,
+            interval_seconds=0,
+        )
+
+        tester.update("camera-01", "rtsp://new/stream", self.source)
+
+        self.assertEqual(client.updated, [("camera-01", "rtsp://new/stream")])
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_update_restores_previous_source_when_not_ready(self) -> None:
+        """Source mới lỗi phải đưa cấu hình MediaMTX trở về source trước đó."""
+        client = FakeMediaMtxClient([False])
+        tester = CameraConnectionTester(
+            client=client,
+            attempts=1,
+            interval_seconds=0,
+        )
+
+        with self.assertRaises(CameraConnectionError):
+            tester.update("camera-01", "rtsp://offline/stream", self.source)
+
+        self.assertEqual(
+            client.updated,
+            [
+                ("camera-01", "rtsp://offline/stream"),
+                ("camera-01", self.source),
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -52,6 +52,15 @@ class AlignmentTestCase(unittest.TestCase):
         self.assertAlmostEqual(scale, 1.8, places=4)
         self.assertAlmostEqual(shift, 0.7, places=4)
 
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_rejects_sample_limit_that_cannot_fit_a_line(self) -> None:
+        """Giới hạn dưới hai mẫu phải bị từ chối bằng lỗi cấu hình rõ ràng."""
+        current = np.ones((2, 2), dtype=np.float32)
+
+        with self.assertRaisesRegex(ValueError, "max_samples"):
+            fit_affine_alignment(current, current, max_samples=1)
+
 
 if __name__ == "__main__":
     unittest.main()

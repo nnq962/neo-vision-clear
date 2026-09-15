@@ -104,6 +104,9 @@ class CalibrationServiceTestCase(unittest.TestCase):
                 patch(
                     "walkway_monitor.calibration.pipeline.cv2.imshow"
                 ) as imshow_mock,
+                patch(
+                    "server.services.calibration.release_worker_memory"
+                ) as cleanup_mock,
             ):
                 started = service.start(baseline.id)
                 result = started
@@ -141,6 +144,7 @@ class CalibrationServiceTestCase(unittest.TestCase):
                 artifact.with_suffix(".depth.jpg"),
             )
             imshow_mock.assert_not_called()
+            cleanup_mock.assert_called_once_with("calibration")
 
     # ─────────────────────────────────────────────────────────────────────────
 

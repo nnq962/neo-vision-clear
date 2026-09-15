@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 DEFAULT_BASELINES_DIRECTORY = "data/baselines"
 DEFAULT_BASELINE_PATH = f"{DEFAULT_BASELINES_DIRECTORY}/default/baseline.npz"
+SUPPORTED_ENCODERS = ("vits", "vitb", "vitl")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def default_checkpoint_path(encoder: str) -> Path:
+    """Trả đường dẫn checkpoint mặc định của một encoder được hỗ trợ."""
+    # Bước 1: báo lỗi sớm để CLI và server dùng cùng một quy tắc encoder.
+    if encoder not in SUPPORTED_ENCODERS:
+        raise ValueError(f"Encoder không được hỗ trợ: {encoder}")
+    return Path("weights") / f"depth_anything_v2_{encoder}.pth"
 
 
 @dataclass(frozen=True)
@@ -28,7 +41,7 @@ class CalibrationConfig:
             raise ValueError("input_size phải lớn hơn hoặc bằng 14.")
         if self.process_width < 0:
             raise ValueError("process_width không được âm.")
-        if self.encoder not in {"vits", "vitb", "vitl"}:
+        if self.encoder not in SUPPORTED_ENCODERS:
             raise ValueError(f"Encoder không được hỗ trợ: {self.encoder}")
 
 
@@ -36,15 +49,15 @@ class CalibrationConfig:
 class DetectionConfig:
     """Cấu hình so sánh depth và tạo mask thay đổi cho từng frame."""
 
-    noise_multiplier           : float = 6.0
-    minimum_difference         : float = 0.03
-    bev_pixels_per_meter       : float = 100.0
-    morphology_divisor         : int   = 180
-    depth_blur_kernel          : int   = 5
-    check_area_padding         : int   = 12
-    depth_alignment            : bool  = True
-    alignment_inlier_ratio     : float = 0.55
-    display_minimum_area_ratio : float = 0.001
+    noise_multiplier: float = 6.0
+    minimum_difference: float = 0.03
+    bev_pixels_per_meter: float = 100.0
+    morphology_divisor: int = 180
+    depth_blur_kernel: int = 5
+    check_area_padding: int = 12
+    depth_alignment: bool = True
+    alignment_inlier_ratio: float = 0.55
+    display_minimum_area_ratio: float = 0.001
 
     # ─────────────────────────────────────────────────────────────────────────
 

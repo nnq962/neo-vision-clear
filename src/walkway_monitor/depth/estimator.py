@@ -9,9 +9,10 @@ import numpy as np
 import torch
 
 from utils.logger import LOGGER
+from walkway_monitor.config import SUPPORTED_ENCODERS
 
 
-MODEL_CONFIGS = {
+MODEL_CONFIGS: dict[str, dict[str, object]] = {
     "vits": {
         "encoder": "vits",
         "features": 64,
@@ -28,6 +29,9 @@ MODEL_CONFIGS = {
         "out_channels": [256, 512, 1024, 1024],
     },
 }
+
+if set(MODEL_CONFIGS) != set(SUPPORTED_ENCODERS):
+    raise RuntimeError("Cấu hình model không khớp danh sách encoder hỗ trợ.")
 
 
 class DepthEstimator(Protocol):

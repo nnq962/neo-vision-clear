@@ -15,12 +15,43 @@ _ROI_COLOR = (0, 255, 255)
 _PADDING_COLOR = np.array([255, 255, 0])
 
 
+class DepthColorizer:
+    """Tô màu depth bằng thang giá trị được cache từ baseline."""
+
+    def __init__(self, reference_depth: np.ndarray):
+        """Tính một lần miền percentile và kích thước depth tham chiếu."""
+        # Bước 1: chỉ nhận reference 2D có ít nhất một giá trị hữu hạn.
+        reference = np.asarray(reference_depth)
+        if reference.ndim != 2:
+            raise ValueError("Reference depth phải là mảng hai chiều.")
+        reference_values = reference[np.isfinite(reference)]
+        if reference_values.size == 0:
+            raise ValueError("Reference depth không có giá trị hữu hạn.")
+
+        # Bước 2: cache percentile để không quét baseline hai lần trên mỗi frame.
+        self._shape = reference.shape
+        self._lower = float(np.percentile(reference_values, 2.0))
+        upper = float(np.percentile(reference_values, 98.0))
+        self._span = max(upper - self._lower, 1e-6)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def colorize(self, depth: np.ndarray) -> np.ndarray:
+        """Chuyển một depth map cùng kích thước thành heatmap BGR."""
+        # Bước 1: kiểm tra shape trước khi chuẩn hóa sang uint8.
+        values = np.asarray(depth)
+        if values.ndim != 2 or values.shape != self._shape:
+            raise ValueError("Depth hiện tại phải cùng kích thước với reference.")
+        normalized = np.clip((values - self._lower) / self._span, 0.0, 1.0)
+        depth_u8 = np.rint(normalized * 255.0).astype(np.uint8)
+        return cv2.applyColorMap(depth_u8, cv2.COLORMAP_TURBO)
+
+
 class DetectionViewRenderer:
     """Render giao diện debug và cache toàn bộ hình học cố định của baseline."""
 
     def __init__(self, baseline: BaselineArtifact):
         """Chuẩn bị ROI, polygon và renderer BEV dùng lại giữa các frame."""
-        self._baseline = baseline
         self._roi_mask = baseline.roi.to_mask(
             baseline.frame_width,
             baseline.frame_height,
@@ -34,6 +65,7 @@ class DetectionViewRenderer:
             raise ValueError("Baseline thiếu tọa độ thực để hiển thị giao diện.")
         self._world_points = world.points
         self._world_unit = world.unit
+        self._depth_colorizer = DepthColorizer(baseline.reference_depth)
         self._bev = BevRenderer(
             baseline,
             baseline.frame_width,
@@ -186,7 +218,7 @@ class DetectionViewRenderer:
         contours: tuple[np.ndarray, ...],
     ) -> np.ndarray:
         """Tạo một heatmap depth có cùng lớp đánh dấu hình học."""
-        panel = colorize_depth(depth, self._baseline.reference_depth)
+        panel = self._depth_colorizer.colorize(depth)
         panel[padding] = (
             0.75 * panel[padding] + 0.25 * _PADDING_COLOR
         ).astype(np.uint8)
@@ -246,16 +278,5 @@ def render_detection_view(
 
 def colorize_depth(depth: np.ndarray, reference_depth: np.ndarray) -> np.ndarray:
     """Tạo heatmap depth ổn định bằng dải percentile cố định của baseline."""
-    if depth.shape != reference_depth.shape or depth.ndim != 2:
-        raise ValueError("Depth hiện tại và reference phải là mảng 2D cùng kích thước.")
-
-    # Bước 1: dùng percentile baseline cố định để màu không thay đổi giữa frame.
-    reference_values = reference_depth[np.isfinite(reference_depth)]
-    lower = float(np.percentile(reference_values, 2.0))
-    upper = float(np.percentile(reference_values, 98.0))
-    span = max(upper - lower, 1e-6)
-
-    # Bước 2: chuẩn hóa depth sang uint8 và áp colormap Turbo.
-    normalized = np.clip((depth - lower) / span, 0.0, 1.0)
-    depth_u8 = np.rint(normalized * 255.0).astype(np.uint8)
-    return cv2.applyColorMap(depth_u8, cv2.COLORMAP_TURBO)
+    # Hàm tiện ích giữ API cũ; renderer realtime tái sử dụng một instance cache.
+    return DepthColorizer(reference_depth).colorize(depth)

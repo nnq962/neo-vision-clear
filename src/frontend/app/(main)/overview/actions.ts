@@ -1,9 +1,6 @@
 "use server"
 
-import {
-  getRuntimeProcessStatus,
-  mapRuntimeProcessStatus,
-} from "@/lib/server/runtime"
+import { mapRuntimeProcessStatus } from "@/lib/server/runtime"
 import type { RuntimeProcessStatus } from "@/lib/types/runtime"
 
 type RuntimeControlResult = {
@@ -60,8 +57,4 @@ export async function startRuntime(): Promise<RuntimeControlResult> {
 
 export async function stopRuntime(): Promise<RuntimeControlResult> {
   return controlRuntime("stop")
-}
-
-export async function refreshRuntimeStatus(): Promise<RuntimeProcessStatus> {
-  return getRuntimeProcessStatus()
 }

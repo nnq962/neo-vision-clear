@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,13 +10,22 @@ from walkway_monitor.detection.models import CorridorSnapshot
 from walkway_monitor.detection.zones import DifferenceZone
 
 
-class CorridorInfoRequest(BaseModel):
-    """Yêu cầu lấy thông tin mới nhất của hành lang đang quan sát."""
+NormalizedCoordinate = Annotated[float, Field(ge=0.0, le=1.0)]
+NormalizedPoint = tuple[NormalizedCoordinate, NormalizedCoordinate]
+
+
+class SnapshotRequest(BaseModel):
+    """Các trường chung của yêu cầu đọc snapshot qua WebSocket."""
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["get_corridor_info"]
     request_id: str = Field(min_length=1, max_length=64)
+
+
+class CorridorInfoRequest(SnapshotRequest):
+    """Yêu cầu lấy thông tin mới nhất của hành lang đang quan sát."""
+
+    type: Literal["get_corridor_info"]
 
 
 class BottleneckPayload(BaseModel):
@@ -44,31 +53,33 @@ class CorridorInfoData(BaseModel):
         return cls.model_validate(snapshot.to_dict())
 
 
-class CorridorInfoResponse(BaseModel):
-    """Phản hồi phép đo cùng trạng thái độ mới của snapshot."""
+class SnapshotResponse(BaseModel):
+    """Các trường trạng thái chung của phản hồi snapshot WebSocket."""
 
-    type: Literal["corridor_info"] = "corridor_info"
     request_id: str
     status: Literal["ok", "warming_up", "stale", "error"]
     age_ms: int | None = None
-    data: CorridorInfoData | None = None
     error: str | None = None
 
 
-class OverviewInfoRequest(BaseModel):
+class CorridorInfoResponse(SnapshotResponse):
+    """Phản hồi phép đo cùng trạng thái độ mới của snapshot."""
+
+    type: Literal["corridor_info"] = "corridor_info"
+    data: CorridorInfoData | None = None
+
+
+class OverviewInfoRequest(SnapshotRequest):
     """Yêu cầu snapshot visualization mới nhất dành cho frontend."""
 
-    model_config = ConfigDict(extra="forbid")
-
     type: Literal["get_overview_info"]
-    request_id: str = Field(min_length=1, max_length=64)
 
 
 class DifferenceZonePayload(BaseModel):
     """Polygon sai khác chuẩn hóa cùng tỷ lệ diện tích trên toàn frame."""
 
-    polygon: list[tuple[float, float]]
-    area_ratio: float
+    polygon: list[NormalizedPoint] = Field(min_length=3, max_length=32)
+    area_ratio: float = Field(ge=0.0, le=1.0)
 
 
 class OverviewInfoData(CorridorInfoData):
@@ -97,15 +108,11 @@ class OverviewInfoData(CorridorInfoData):
         return cls.model_validate(payload)
 
 
-class OverviewInfoResponse(BaseModel):
+class OverviewInfoResponse(SnapshotResponse):
     """Phản hồi WebSocket riêng cho dashboard có cả số đo và zone."""
 
     type: Literal["overview_info"] = "overview_info"
-    request_id: str
-    status: Literal["ok", "warming_up", "stale", "error"]
-    age_ms: int | None = None
     data: OverviewInfoData | None = None
-    error: str | None = None
 
 
 class ProtocolErrorResponse(BaseModel):

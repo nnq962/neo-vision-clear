@@ -2,6 +2,7 @@
 
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -57,8 +58,10 @@ export const CalibrationCameraWorkspace = forwardRef<
   const [points, setPoints] = useState<RoiPoint[]>(() =>
     initialPoints.map(([x, y]) => ({ x: x * VIEW_WIDTH, y: y * VIEW_HEIGHT }))
   )
-  const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const draggingIndexRef = useRef<number | null>(null)
+  const dragFrameRef = useRef(0)
+  const pendingPointRef = useRef<RoiPoint | undefined>(undefined)
 
   function pointFromEvent(event: PointerEvent<SVGSVGElement>): RoiPoint {
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -81,11 +84,11 @@ export const CalibrationCameraWorkspace = forwardRef<
     )
 
     if (selectedIndex >= 0) {
-      setDraggingIndex(selectedIndex)
+      draggingIndexRef.current = selectedIndex
     } else if (points.length < MAX_POINTS) {
       const newPoints = [...points, nextPoint]
       setPoints(newPoints)
-      setDraggingIndex(newPoints.length - 1)
+      draggingIndexRef.current = newPoints.length - 1
       if (newPoints.length === MAX_POINTS) {
         toast.success("Đã chọn đủ 4 điểm ROI.")
       }
@@ -94,29 +97,59 @@ export const CalibrationCameraWorkspace = forwardRef<
   }
 
   function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
-    if (draggingIndex === null) return
+    if (draggingIndexRef.current === null) return
 
-    const nextPoint = pointFromEvent(event)
-    setPoints((currentPoints) =>
-      currentPoints.map((point, index) =>
-        index === draggingIndex ? nextPoint : point
+    // Giới hạn cập nhật React theo nhịp vẽ màn hình khi pointer phát sự kiện dày.
+    pendingPointRef.current = pointFromEvent(event)
+    if (dragFrameRef.current) return
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      dragFrameRef.current = 0
+      const point = pendingPointRef.current
+      const draggingIndex = draggingIndexRef.current
+      if (!point || draggingIndex === null) return
+      setPoints((currentPoints) =>
+        currentPoints.map((currentPoint, index) =>
+          index === draggingIndex ? point : currentPoint
+        )
       )
-    )
+    })
   }
 
   function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
-    setDraggingIndex(null)
+    if (dragFrameRef.current) {
+      window.cancelAnimationFrame(dragFrameRef.current)
+      dragFrameRef.current = 0
+    }
+    const point = pendingPointRef.current
+    const draggingIndex = draggingIndexRef.current
+    if (point && draggingIndex !== null) {
+      setPoints((currentPoints) =>
+        currentPoints.map((currentPoint, index) =>
+          index === draggingIndex ? point : currentPoint
+        )
+      )
+    }
+    pendingPointRef.current = undefined
+    draggingIndexRef.current = null
     if (svgRef.current?.hasPointerCapture(event.pointerId)) {
       svgRef.current.releasePointerCapture(event.pointerId)
     }
   }
 
   function resetPoints() {
+    if (dragFrameRef.current) window.cancelAnimationFrame(dragFrameRef.current)
     setPoints([])
-    setDraggingIndex(null)
+    pendingPointRef.current = undefined
+    draggingIndexRef.current = null
   }
 
   useImperativeHandle(ref, () => ({ resetPoints }))
+  useEffect(
+    () => () => {
+      if (dragFrameRef.current) window.cancelAnimationFrame(dragFrameRef.current)
+    },
+    []
+  )
 
   const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(" ")
 

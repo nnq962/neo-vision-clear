@@ -41,6 +41,7 @@ class FakeCameraConnectionTester:
         """Mặc định cho phép mọi kết nối."""
         self.error: str | None = None
         self.registered: list[str] = []
+        self.updated: list[tuple[str, str, str]] = []
         self.removed: list[str] = []
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -56,6 +57,19 @@ class FakeCameraConnectionTester:
     def remove(self, _path_name: str) -> None:
         """Mô phỏng xóa path thành công."""
         self.removed.append(_path_name)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def update(
+        self,
+        path_name: str,
+        source: str,
+        previous_source: str,
+    ) -> None:
+        """Mô phỏng đổi source hoặc phát sinh lỗi kết nối."""
+        if self.error is not None:
+            raise CameraConnectionError(self.error)
+        self.updated.append((path_name, source, previous_source))
 
 
 class CameraApiTestCase(unittest.TestCase):
@@ -181,6 +195,46 @@ class CameraApiTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def test_source_update_is_applied_to_mediamtx_before_json(self) -> None:
+        """PATCH source phải đồng bộ MediaMTX và chỉ sau đó mới lưu JSON."""
+        created = self.client.post(
+            "/api/cameras",
+            json={"name": "Camera", "source": "rtsp://old/stream"},
+        ).json()
+
+        response = self.client.patch(
+            f"/api/cameras/{created['id']}",
+            json={"source": "rtsp://new/stream"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["source"], "rtsp://new/stream")
+        self.assertEqual(
+            self.connection_tester.updated,
+            [(created["id"], "rtsp://new/stream", "rtsp://old/stream")],
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_source_update_failure_preserves_json(self) -> None:
+        """Source mới không kết nối được phải giữ nguyên camera đã lưu."""
+        created = self.client.post(
+            "/api/cameras",
+            json={"name": "Camera", "source": "rtsp://old/stream"},
+        ).json()
+        self.connection_tester.error = "MediaMTX không nhận được luồng camera."
+
+        response = self.client.patch(
+            f"/api/cameras/{created['id']}",
+            json={"source": "rtsp://offline/stream"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        stored = self.client.get(f"/api/cameras/{created['id']}").json()
+        self.assertEqual(stored["source"], "rtsp://old/stream")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def test_list_update_and_delete_camera(self) -> None:
         """Camera đã tạo phải đọc, đổi tên và xóa được."""
         created = self.client.post(
@@ -214,6 +268,23 @@ class CameraApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertFalse(self.config_path.exists())
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_rejects_invalid_url_before_updating_mediamtx(self) -> None:
+        """PATCH URL sai phải bị Pydantic chặn trước khi gọi MediaMTX."""
+        created = self.client.post(
+            "/api/cameras",
+            json={"name": "Camera", "source": "rtsp://old/stream"},
+        ).json()
+
+        response = self.client.patch(
+            f"/api/cameras/{created['id']}",
+            json={"source": "https://invalid.example/stream"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.connection_tester.updated, [])
 
     # ─────────────────────────────────────────────────────────────────────────
 

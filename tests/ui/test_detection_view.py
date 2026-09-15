@@ -1,12 +1,17 @@
 """Kiểm thử heatmap depth dùng trong giao diện detection."""
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from walkway_monitor.config import DetectionConfig
 from walkway_monitor.detection.detector import WalkwayAnalyzer
-from walkway_monitor.ui.detection_view import colorize_depth, render_detection_view
+from walkway_monitor.ui.detection_view import (
+    DepthColorizer,
+    colorize_depth,
+    render_detection_view,
+)
 from tests.detection.test_detector import make_baseline
 
 
@@ -20,6 +25,21 @@ class DepthHeatmapTestCase(unittest.TestCase):
         self.assertEqual(heatmap.shape, (20, 30, 3))
         self.assertEqual(heatmap.dtype, np.uint8)
         self.assertGreater(len(np.unique(heatmap.reshape(-1, 3), axis=0)), 10)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_depth_colorizer_caches_reference_percentiles(self) -> None:
+        """Renderer dùng lại thang màu mà không tính percentile theo từng frame."""
+        reference = np.linspace(0.0, 1.0, 600, dtype=np.float32).reshape(20, 30)
+        with patch(
+            "walkway_monitor.ui.detection_view.np.percentile",
+            wraps=np.percentile,
+        ) as percentile:
+            colorizer = DepthColorizer(reference)
+            colorizer.colorize(reference)
+            colorizer.colorize(reference)
+
+        self.assertEqual(percentile.call_count, 2)
 
     # ─────────────────────────────────────────────────────────────────────────
 

@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+DEFAULT_BASELINES_DIRECTORY = "data/baselines"
+DEFAULT_BASELINE_PATH = f"{DEFAULT_BASELINES_DIRECTORY}/default/baseline.npz"
+
+
 @dataclass(frozen=True)
 class CalibrationConfig:
     """Cấu hình quá trình thu và tổng hợp baseline của lối đi trống."""

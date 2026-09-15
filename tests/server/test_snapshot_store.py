@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from server.services.snapshot_store import SnapshotStore
 from walkway_monitor.detection.models import CorridorSnapshot
+from walkway_monitor.detection.zones import DifferenceZone
 
 
 def make_snapshot() -> CorridorSnapshot:
@@ -48,6 +49,27 @@ class SnapshotStoreTestCase(unittest.TestCase):
 
         self.assertEqual(reading.status, "error")
         self.assertEqual(reading.error, "camera disconnected")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_snapshot_and_zones_are_published_and_reset_together(self) -> None:
+        """Zone phải đi cùng đúng snapshot và bị xóa khi mở phiên runtime mới."""
+        store = SnapshotStore()
+        zone = DifferenceZone(
+            polygon=((0.1, 0.2), (0.4, 0.2), (0.4, 0.6)),
+            area_ratio=0.06,
+        )
+
+        # Bước 1: công bố rồi đọc lại cả hai phần trong cùng state của store.
+        store.publish(make_snapshot(), (zone,))
+        reading = store.read(maximum_age_seconds=2.0)
+        self.assertEqual(reading.difference_zones, (zone,))
+
+        # Bước 2: reset không được để zone cũ xuất hiện ở phiên kế tiếp.
+        store.reset()
+        reset_reading = store.read(maximum_age_seconds=2.0)
+        self.assertEqual(reset_reading.status, "warming_up")
+        self.assertEqual(reset_reading.difference_zones, ())
 
 
 if __name__ == "__main__":

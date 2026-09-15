@@ -3,17 +3,20 @@ uv run walkway-monitor calibrate \
   --frames 160
 
 
-uv run walkway-monitor detect --source 'rtsp://admin:061223%40bC@10.70.22.220:554/Streaming/Channels/101' --baseline data/walkway_baseline.npz  --minimum-difference 0.08 --no-depth-alignment
+uv run walkway-monitor detect --source 'rtsp://admin:061223%40bC@10.70.22.220:554/Streaming/Channels/101' --baseline data/baselines/default/baseline.npz  --minimum-difference 0.08 --no-depth-alignment
 
 
 uv run walkway-monitor detect \
   --source 'rtsp://...' \
-  --baseline data/walkway_baseline.npz \
+  --baseline data/baselines/default/baseline.npz \
   --no-depth-alignment \
   --minimum-difference 0.01 \
   --minimum-free-width-ratio 0.55
 
 
 WALKWAY_SOURCE='rtsp://admin:061223%40bC@10.70.22.220:554/Streaming/Channels/101' \
-WALKWAY_BASELINE='data/walkway_baseline.npz' \
+WALKWAY_BASELINE='data/baselines/default/baseline.npz' \
 uv run walkway-server
+
+
+uv run walkway-monitor detect --source 'rtsp://admin:061223%40bC@10.70.22.220:554/Streaming/Channels/101' --baseline data/baselines/ea7eb7e1f67d/baseline.npz  --minimum-difference 0.08 --no-depth-heatmaps

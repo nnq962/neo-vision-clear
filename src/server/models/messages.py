@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from walkway_monitor.detection.models import CorridorSnapshot
+from walkway_monitor.detection.zones import DifferenceZone
 
 
 class CorridorInfoRequest(BaseModel):
@@ -51,6 +52,59 @@ class CorridorInfoResponse(BaseModel):
     status: Literal["ok", "warming_up", "stale", "error"]
     age_ms: int | None = None
     data: CorridorInfoData | None = None
+    error: str | None = None
+
+
+class OverviewInfoRequest(BaseModel):
+    """Yêu cầu snapshot visualization mới nhất dành cho frontend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["get_overview_info"]
+    request_id: str = Field(min_length=1, max_length=64)
+
+
+class DifferenceZonePayload(BaseModel):
+    """Polygon sai khác chuẩn hóa cùng tỷ lệ diện tích trên toàn frame."""
+
+    polygon: list[tuple[float, float]]
+    area_ratio: float
+
+
+class OverviewInfoData(CorridorInfoData):
+    """Dữ liệu số đo mở rộng thêm zone phục vụ overlay video."""
+
+    changed_zones: list[DifferenceZonePayload]
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot: CorridorSnapshot,
+        zones: tuple[DifferenceZone, ...],
+    ) -> "OverviewInfoData":
+        """Ghép snapshot robot với polygon visualization thuần JSON."""
+        # Bước 1: tái sử dụng ánh xạ số đo và chỉ thêm payload zone đã giới hạn.
+        payload = CorridorInfoData.from_snapshot(snapshot).model_dump()
+        payload["changed_zones"] = [
+            {
+                "polygon": list(zone.polygon),
+                "area_ratio": zone.area_ratio,
+            }
+            for zone in zones
+        ]
+        return cls.model_validate(payload)
+
+
+class OverviewInfoResponse(BaseModel):
+    """Phản hồi WebSocket riêng cho dashboard có cả số đo và zone."""
+
+    type: Literal["overview_info"] = "overview_info"
+    request_id: str
+    status: Literal["ok", "warming_up", "stale", "error"]
+    age_ms: int | None = None
+    data: OverviewInfoData | None = None
     error: str | None = None
 
 

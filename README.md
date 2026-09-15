@@ -28,7 +28,7 @@ uv run walkway-monitor calibrate \
   --source 'rtsp://user:password@camera/stream' \
   --encoder vits \
   --frames 60 \
-  --output data/walkway_baseline.npz
+  --output data/baselines/default/baseline.npz
 ```
 
 Nếu OpenCV không có GStreamer hoặc pipeline GStreamer không phù hợp:
@@ -47,7 +47,7 @@ Phần đầu video dùng để calibration phải quay cảnh lối đi trống
 uv run walkway-monitor calibrate \
   --source assets/examples_video/hospital_corridor.mp4 \
   --frames 60 \
-  --output data/walkway_baseline.npz
+  --output data/baselines/default/baseline.npz
 ```
 
 Quy trình tương tác:
@@ -97,10 +97,10 @@ khung cảnh không được xét.
 Kết quả gồm:
 
 ```text
-data/walkway_baseline.npz
-data/walkway_baseline.json
-data/walkway_baseline.preview.jpg
-data/walkway_baseline.depth.jpg
+data/baselines/default/baseline.npz
+data/baselines/default/baseline.json
+data/baselines/default/baseline.preview.jpg
+data/baselines/default/baseline.depth.jpg
 ```
 
 File NPZ chứa reference depth, noise map, polygon ROI chuẩn hóa và metadata calibration.
@@ -128,7 +128,7 @@ Nguồn detection phải đến từ cùng camera, cùng góc nhìn và cùng t�
 ```bash
 uv run walkway-monitor detect \
   --source 'rtsp://user:password@camera/stream' \
-  --baseline data/walkway_baseline.npz
+  --baseline data/baselines/default/baseline.npz
 ```
 
 ### Chạy với video
@@ -136,7 +136,7 @@ uv run walkway-monitor detect \
 ```bash
 uv run walkway-monitor detect \
   --source assets/examples_video/hospital_corridor.mp4 \
-  --baseline data/walkway_baseline.npz
+  --baseline data/baselines/default/baseline.npz
 ```
 
 Checkpoint mặc định được chọn từ encoder lưu trong baseline. Ví dụ baseline dùng `vits` thì
@@ -156,7 +156,7 @@ Hai heatmap được bật mặc định. Có thể ẩn hàng heatmap để c�
 ```bash
 uv run walkway-monitor detect \
   --source 'rtsp://user:password@camera/stream' \
-  --baseline data/walkway_baseline.npz \
+  --baseline data/baselines/default/baseline.npz \
   --no-depth-heatmaps
 ```
 
@@ -170,7 +170,7 @@ Khi chạy không hiển thị, pipeline vẫn log FPS và thời gian từng c�
 ```bash
 uv run walkway-monitor detect \
   --source 'rtsp://user:password@camera/stream' \
-  --baseline data/walkway_baseline.npz \
+  --baseline data/baselines/default/baseline.npz \
   --no-display \
   --log-interval 2
 ```
@@ -212,11 +212,83 @@ mở nguồn camera khi startup và yêu cầu worker dừng khi shutdown. Cấu
 
 ```bash
 WALKWAY_SOURCE='rtsp://user:password@camera/stream' \
-WALKWAY_BASELINE='data/walkway_baseline.npz' \
+WALKWAY_BASELINE='data/baselines/default/baseline.npz' \
 WALKWAY_HOST='0.0.0.0' \
 WALKWAY_PORT='8000' \
 uv run walkway-server
 ```
+
+Calibration chạy từ API gom mỗi bộ artifact vào một thư mục riêng:
+
+```text
+data/baselines/<baseline_id>/
+├── baseline.npz
+├── baseline.json
+├── baseline.preview.jpg
+└── baseline.depth.jpg
+```
+
+Có thể đổi thư mục gốc bằng biến môi trường `NVC_BASELINES_PATH`.
+
+### Cấu hình runtime
+
+Runtime được lưu chung trong `data/config.json`. Camera được lấy từ trường `camera`, còn
+artifact được suy ra từ `active_baseline_id`, nên không cần lặp URL hoặc đường dẫn file:
+
+```json
+{
+  "runtime": {
+    "enabled": false,
+    "active_baseline_id": null,
+    "snapshot_max_age_seconds": 2.0,
+    "log_interval_seconds": 2.0,
+    "detection": {
+      "noise_multiplier": 6.0,
+      "minimum_difference": 0.03,
+      "bev_pixels_per_meter": 100.0,
+      "morphology_divisor": 180,
+      "depth_blur_kernel": 5,
+      "check_area_padding": 12,
+      "depth_alignment": true,
+      "alignment_inlier_ratio": 0.55,
+      "display_minimum_area_ratio": 0.001
+    }
+  }
+}
+```
+
+API cấu hình chỉ lưu tham số. Runtime được điều khiển riêng để request không phải
+chờ nạp model, inference hoặc camera đóng kết nối:
+
+```bash
+# Bắt đầu worker nền từ camera và active_baseline_id đã lưu
+curl -X POST http://127.0.0.1:8000/api/runtime/start
+
+# Đọc trạng thái: stopped, starting, running, stopping hoặc failed
+curl http://127.0.0.1:8000/api/runtime/status
+
+# Phát tín hiệu dừng và nhận HTTP 202 ngay
+curl -X POST http://127.0.0.1:8000/api/runtime/stop
+```
+
+`POST /api/runtime/start` chỉ tạo thread rồi trả về; model và pipeline được nạp
+trong worker. Mọi lỗi của worker được giữ trong `error` của endpoint status thay
+vì làm dừng FastAPI. `POST /api/runtime/stop` không chờ camera đóng xong; trạng
+thái chuyển qua `stopping` rồi thành `stopped` sau khi worker giải phóng tài nguyên.
+Trong pha cleanup, service bỏ tham chiếu pipeline/model/baseline, chạy garbage
+collection và gọi `torch.cuda.empty_cache()` khi CUDA khả dụng. Chỉ nên coi tài
+nguyên đã được nhả xong sau khi endpoint status trả `stopped`.
+
+API đọc và cập nhật cấu hình:
+
+```text
+GET /api/runtime
+PUT /api/runtime
+```
+
+Khi `enabled=true`, `active_baseline_id` là bắt buộc, phải tồn tại và phải thuộc camera
+hiện tại. Thay hoặc xóa camera, hay xóa baseline đang active, sẽ tự đưa runtime về trạng
+thái tắt an toàn.
 
 Robot kết nối tới `ws://<host>:8000/ws/corridor` và gửi:
 
@@ -249,6 +321,45 @@ Server trả dữ liệu mới nhất và giữ nguyên `request_id`:
 `status` có thể là `ok`, `warming_up`, `stale` hoặc `error`. Đây chỉ là trạng
 thái của dữ liệu/camera; server không kết luận robot có đi qua được hay không.
 Endpoint `GET /health` cung cấp cùng trạng thái để health-check service.
+
+Dashboard dùng endpoint riêng `ws://<host>:8000/ws/overview` để nhận thêm vùng
+sai khác với baseline mà không làm tăng payload dành cho robot. Frontend gửi:
+
+```json
+{"type": "get_overview_info", "request_id": "overview-01"}
+```
+
+Response có các trường số đo giống `corridor_info` và bổ sung `changed_zones`:
+
+```json
+{
+  "type": "overview_info",
+  "request_id": "overview-01",
+  "status": "ok",
+  "data": {
+    "maximum_passable_width_meters": 0.82,
+    "walkway_width_meters": 1.75,
+    "bottleneck": {
+      "y_meters": 2.35,
+      "free_x_ranges_meters": [[0.0, 0.82]]
+    },
+    "frame_index": 120,
+    "captured_at": 1789119256.74,
+    "changed_zones": [
+      {
+        "polygon": [[0.21, 0.34], [0.42, 0.35], [0.40, 0.68]],
+        "area_ratio": 0.037
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+Tọa độ polygon được chuẩn hóa theo chiều rộng và chiều cao frame về `[0, 1]`.
+Mỗi frame gửi tối đa 20 zone và 32 đỉnh mỗi zone; dashboard vẽ chúng bằng lớp
+SVG trong suốt trên video WebRTC. Khi runtime dừng hoặc chưa có snapshot, lớp
+overlay được xóa.
 
 ## Kiểm thử
 

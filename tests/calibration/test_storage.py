@@ -7,7 +7,12 @@ from pathlib import Path
 
 import numpy as np
 
-from walkway_monitor.calibration.storage import load_baseline, save_baseline
+from walkway_monitor.calibration.storage import (
+    artifact_path_for_id,
+    delete_artifacts_for_id,
+    load_baseline,
+    save_baseline,
+)
 from walkway_monitor.models import BaselineArtifact, RoiDefinition, WorldCoordinates
 
 
@@ -73,6 +78,41 @@ class BaselineStorageTestCase(unittest.TestCase):
             artifact.roi.world_coordinates.points,
         )
         self.assertEqual(exported["world_coordinates"]["unit"], "m")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_artifact_path_groups_files_by_baseline_id(self) -> None:
+        """Helper phải đặt file chính trong thư mục mang ID baseline."""
+        path = artifact_path_for_id("data/baselines", "abc123")
+
+        self.assertEqual(
+            path,
+            Path("data/baselines/abc123/baseline.npz"),
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_delete_artifacts_removes_new_and_legacy_layouts(self) -> None:
+        """Xóa baseline phải dọn đủ artifact mới lẫn file phẳng cũ."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical_directory = root / "abc123"
+            canonical_directory.mkdir()
+            for filename in (
+                "baseline.npz",
+                "baseline.json",
+                "baseline.preview.jpg",
+                "baseline.depth.jpg",
+            ):
+                (canonical_directory / filename).touch()
+            for suffix in (".npz", ".json", ".preview.jpg", ".depth.jpg"):
+                (root / f"abc123{suffix}").touch()
+
+            removed = delete_artifacts_for_id(root, "abc123")
+
+            self.assertEqual(len(removed), 8)
+            self.assertFalse(canonical_directory.exists())
+            self.assertEqual(list(root.iterdir()), [])
 
 
 if __name__ == "__main__":

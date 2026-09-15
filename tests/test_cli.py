@@ -3,6 +3,7 @@
 import unittest
 
 from walkway_monitor.cli import build_parser
+from walkway_monitor.config import DEFAULT_BASELINE_PATH
 
 
 class CliParserTestCase(unittest.TestCase):
@@ -23,6 +24,18 @@ class CliParserTestCase(unittest.TestCase):
         self.assertTrue(default_args.depth_heatmaps)
         self.assertFalse(hidden_args.depth_heatmaps)
         self.assertTrue(shown_args.depth_heatmaps)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_uses_grouped_default_baseline_path(self) -> None:
+        """Hai command mặc định phải đọc và ghi cùng baseline trong thư mục riêng."""
+        parser = build_parser()
+
+        calibration_args = parser.parse_args(["calibrate", "--source", "video.mp4"])
+        detection_args = parser.parse_args(["detect", "--source", "video.mp4"])
+
+        self.assertEqual(calibration_args.output, DEFAULT_BASELINE_PATH)
+        self.assertEqual(detection_args.baseline, DEFAULT_BASELINE_PATH)
 
     # ─────────────────────────────────────────────────────────────────────────
 

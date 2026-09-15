@@ -5,18 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 
+from walkway_monitor.config import DEFAULT_BASELINE_PATH, DEFAULT_BASELINES_DIRECTORY
+
 
 @dataclass(frozen=True)
 class ServerSettings:
     """Nhóm cấu hình cần để khởi động FastAPI và worker camera."""
 
     source: str | int = 0
-    baseline_path: str = "data/walkway_baseline.npz"
+    camera_config_path: str = "data/config.json"
+    baselines_directory: str = DEFAULT_BASELINES_DIRECTORY
+    mediamtx_rtsp_url: str = "rtsp://127.0.0.1:8554"
+    baseline_path: str = DEFAULT_BASELINE_PATH
     checkpoint_path: str | None = None
     host: str = "0.0.0.0"
     port: int = 8000
     snapshot_max_age_seconds: float = 2.0
-    use_gstreamer: bool = True
     open_timeout_ms: int = 5000
     read_timeout_ms: int = 5000
     log_interval: float = 2.0
@@ -34,12 +38,23 @@ class ServerSettings:
 
         # Bước 2: đọc các giá trị còn lại và dùng mặc định an toàn cho server.
         checkpoint = os.getenv("WALKWAY_CHECKPOINT") or None
-        use_gstreamer = os.getenv("WALKWAY_USE_GSTREAMER", "true").lower()
         return cls(
             source=source,
+            camera_config_path=os.getenv(
+                "NVC_CONFIG_PATH",
+                "data/config.json",
+            ),
+            baselines_directory=os.getenv(
+                "NVC_BASELINES_PATH",
+                DEFAULT_BASELINES_DIRECTORY,
+            ),
+            mediamtx_rtsp_url=os.getenv(
+                "MEDIAMTX_RTSP_URL",
+                "rtsp://127.0.0.1:8554",
+            ),
             baseline_path=os.getenv(
                 "WALKWAY_BASELINE",
-                "data/walkway_baseline.npz",
+                DEFAULT_BASELINE_PATH,
             ),
             checkpoint_path=checkpoint,
             host=os.getenv("WALKWAY_HOST", "0.0.0.0"),
@@ -47,7 +62,6 @@ class ServerSettings:
             snapshot_max_age_seconds=float(
                 os.getenv("WALKWAY_SNAPSHOT_MAX_AGE_SECONDS", "2.0")
             ),
-            use_gstreamer=use_gstreamer not in {"0", "false", "no", "off"},
             open_timeout_ms=int(os.getenv("WALKWAY_OPEN_TIMEOUT_MS", "5000")),
             read_timeout_ms=int(os.getenv("WALKWAY_READ_TIMEOUT_MS", "5000")),
             log_interval=float(os.getenv("WALKWAY_LOG_INTERVAL", "2.0")),
@@ -57,6 +71,12 @@ class ServerSettings:
 
     def validate(self) -> None:
         """Kiểm tra cấu hình trước khi FastAPI khởi động worker."""
+        if not self.camera_config_path.strip():
+            raise ValueError("camera_config_path không được để trống.")
+        if not self.baselines_directory.strip():
+            raise ValueError("baselines_directory không được để trống.")
+        if not self.mediamtx_rtsp_url.strip():
+            raise ValueError("mediamtx_rtsp_url không được để trống.")
         if not str(self.baseline_path).strip():
             raise ValueError("baseline_path không được để trống.")
         if not 1 <= self.port <= 65535:

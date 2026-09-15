@@ -97,6 +97,66 @@ class CalibrationPipelineTestCase(unittest.TestCase):
             self.assertEqual(artifact.frame_count, 5)
             self.assertEqual(artifact.source_type, "VIDEO")
 
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_headless_pipeline_uses_supplied_roi_without_windows(self) -> None:
+        """Chế độ API không được chọn ROI hoặc gọi API cửa sổ OpenCV."""
+        roi = RoiDefinition(
+            normalized_points=np.array(
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                dtype=np.float32,
+            )
+        )
+        progress: list[tuple[int, int]] = []
+        pipeline = CalibrationPipeline(
+            estimator=FakeEstimator(),
+            config=CalibrationConfig(frame_count=5, process_width=0),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "headless.npz"
+            with (
+                patch(
+                    "walkway_monitor.calibration.pipeline.MediaSources",
+                    FakeMediaSources,
+                ),
+                patch(
+                    "walkway_monitor.calibration.pipeline.select_polygon"
+                ) as select_polygon_mock,
+                patch(
+                    "walkway_monitor.calibration.pipeline.wait_for_empty_confirmation"
+                ) as confirmation_mock,
+                patch(
+                    "walkway_monitor.calibration.pipeline.cv2.imshow"
+                ) as imshow_mock,
+                patch(
+                    "walkway_monitor.calibration.pipeline.cv2.waitKey"
+                ) as wait_key_mock,
+                patch(
+                    "walkway_monitor.calibration.pipeline.cv2.destroyWindow"
+                ) as destroy_window_mock,
+                patch(
+                    "walkway_monitor.calibration.pipeline.cv2.destroyAllWindows"
+                ) as destroy_all_mock,
+            ):
+                pipeline.run(
+                    "video.mp4",
+                    output,
+                    roi=roi,
+                    display=False,
+                    on_progress=lambda current, total: progress.append(
+                        (current, total)
+                    ),
+                )
+
+            self.assertTrue(output.is_file())
+            self.assertEqual(progress, [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)])
+            select_polygon_mock.assert_not_called()
+            confirmation_mock.assert_not_called()
+            imshow_mock.assert_not_called()
+            wait_key_mock.assert_not_called()
+            destroy_window_mock.assert_not_called()
+            destroy_all_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

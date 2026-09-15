@@ -8,7 +8,11 @@ from pathlib import Path
 from utils.logger import LOGGER
 from walkway_monitor.calibration.pipeline import CalibrationPipeline
 from walkway_monitor.calibration.storage import load_baseline
-from walkway_monitor.config import CalibrationConfig, DetectionConfig
+from walkway_monitor.config import (
+    DEFAULT_BASELINE_PATH,
+    CalibrationConfig,
+    DetectionConfig,
+)
 from walkway_monitor.depth.estimator import DepthAnythingEstimator
 from walkway_monitor.detection.pipeline import DetectionPipeline
 
@@ -43,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibration_parser.add_argument("--process-width", type=int, default=960)
     calibration_parser.add_argument(
         "--output",
-        default="data/walkway_baseline.npz",
+        default=DEFAULT_BASELINE_PATH,
     )
     calibration_parser.add_argument(
         "--preview",
@@ -72,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     detection_parser.add_argument(
         "--baseline",
-        default="data/walkway_baseline.npz",
+        default=DEFAULT_BASELINE_PATH,
     )
     detection_parser.add_argument(
         "--checkpoint",

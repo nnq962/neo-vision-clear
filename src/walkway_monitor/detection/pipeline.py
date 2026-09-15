@@ -50,6 +50,7 @@ class DetectionPipeline:
         *,
         stop_event: threading.Event | None = None,
         on_snapshot: Callable[[CorridorSnapshot], None] | None = None,
+        on_output: Callable[[DetectionOutput], None] | None = None,
         **media_options,
     ) -> int:
         """Xử lý nguồn tới khi video kết thúc hoặc người dùng nhấn Q/Esc."""
@@ -84,6 +85,8 @@ class DetectionPipeline:
                     output = self._analyzer.process(depth)
                     if on_snapshot is not None:
                         on_snapshot(output.snapshot)
+                    if on_output is not None:
+                        on_output(output)
                     analysis_time = time.perf_counter() - analysis_started
                     processed_frames += 1
 

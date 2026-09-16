@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from server.models.calibration import CalibrationConfig
 from server.models.camera import CameraConfig
+from server.models.uart import UartConfig
 from walkway_monitor.config import DetectionConfig
 
 
@@ -80,7 +81,7 @@ class RuntimeProcessResponse(BaseModel):
 
 
 class AppConfigDocument(BaseModel):
-    """Tài liệu data/config.json chứa camera, baseline và runtime."""
+    """Tài liệu data/config.json chứa camera, baseline, runtime và UART."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -88,6 +89,7 @@ class AppConfigDocument(BaseModel):
     camera: CameraConfig | None = None
     baselines: list[CalibrationConfig] = Field(default_factory=list)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    uart: UartConfig = Field(default_factory=UartConfig)
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -147,4 +149,5 @@ class AppConfigDocument(BaseModel):
             "camera": camera,
             "baselines": baselines,
             "runtime": payload.get("runtime", RuntimeConfig()),
+            "uart": payload.get("uart", UartConfig()),
         }

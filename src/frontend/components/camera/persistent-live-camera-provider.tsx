@@ -20,8 +20,6 @@ type PersistentLiveCameraContextValue = {
   registerHost: (host: CameraHost) => () => void
 }
 
-const WEBRTC_BASE_URL =
-  process.env.NEXT_PUBLIC_MEDIAMTX_WEBRTC_URL ?? "http://127.0.0.1:8889"
 const PLAYER_PARAMETERS = new URLSearchParams({
   autoplay: "true",
   controls: "false",
@@ -29,6 +27,14 @@ const PLAYER_PARAMETERS = new URLSearchParams({
   muted: "true",
   playsinline: "true",
 }).toString()
+
+function resolveWebRtcBaseUrl() {
+  const configuredUrl = process.env.NEXT_PUBLIC_MEDIAMTX_WEBRTC_URL
+  if (configuredUrl) return configuredUrl.replace(/\/$/, "")
+  if (typeof window === "undefined") return ""
+
+  return `${window.location.protocol}//${window.location.hostname}:8889`
+}
 
 export const PersistentLiveCameraContext =
   createContext<PersistentLiveCameraContextValue | null>(null)
@@ -43,6 +49,7 @@ export function PersistentLiveCameraProvider({
     Pick<CameraHost, "cameraId" | "cameraName">
   >()
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const webRtcBaseUrl = resolveWebRtcBaseUrl()
 
   const registerHost = useCallback((nextHost: CameraHost) => {
     setHost(nextHost)
@@ -107,7 +114,7 @@ export function PersistentLiveCameraProvider({
         <iframe
           ref={iframeRef}
           className="pointer-events-none absolute left-0 top-0 z-10 rounded-xl border bg-black invisible"
-          src={`${WEBRTC_BASE_URL}/${encodeURIComponent(connectedCamera.cameraId)}/?${PLAYER_PARAMETERS}`}
+          src={`${webRtcBaseUrl}/${encodeURIComponent(connectedCamera.cameraId)}/?${PLAYER_PARAMETERS}`}
           title={`Video trực tiếp từ ${connectedCamera.cameraName}`}
           allow="autoplay"
           tabIndex={-1}

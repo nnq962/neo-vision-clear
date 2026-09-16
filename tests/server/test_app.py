@@ -1,10 +1,15 @@
 """Kiểm thử lifespan, health-check và WebSocket bằng monitor giả."""
 
+from pathlib import Path
+import tempfile
 import unittest
 
 from fastapi.testclient import TestClient
 
 from server.app import create_app
+from server.models.camera import CameraConfig, CameraCreate
+from server.services.camera_connection import CameraConnectionError
+from server.services.config_store import ConfigStore
 from server.services.snapshot_store import SnapshotRead, SnapshotStore
 from server.settings import ServerSettings
 from walkway_monitor.detection.models import CorridorSnapshot
@@ -53,12 +58,79 @@ class FakeMonitorService:
         return self.snapshot_store.read(self.settings.snapshot_max_age_seconds)
 
 
+class FakeCameraConnectionTester:
+    """Ghi nhận thao tác khôi phục camera trong lifespan."""
+
+    def __init__(self, error: CameraConnectionError | None = None):
+        """Khởi tạo tester với lỗi tùy chọn cho kịch bản suy giảm."""
+        self.error = error
+        self.restored: list[tuple[str, CameraConfig]] = []
+
+    # ────────────────────────────────────────────────────────────────────────
+
+    def restore(self, path_name: str, camera: CameraConfig) -> None:
+        """Ghi nhận camera và phát sinh lỗi đã cấu hình nếu có."""
+        self.restored.append((path_name, camera))
+        if self.error is not None:
+            raise self.error
+
+
 class ServerAppTestCase(unittest.TestCase):
     """Kiểm tra tài nguyên lifespan và protocol request-response."""
 
     def setUp(self) -> None:
         """Tạo settings không phụ thuộc camera hoặc file thật."""
-        self.settings = ServerSettings(snapshot_max_age_seconds=5.0)
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        self.config_path = Path(temporary_directory.name) / "config.json"
+        self.settings = ServerSettings(
+            camera_config_path=str(self.config_path),
+            snapshot_max_age_seconds=5.0,
+        )
+
+    # ────────────────────────────────────────────────────────────────────────
+
+    def test_lifespan_restores_persisted_camera_path(self) -> None:
+        """Startup phải đăng ký lại camera đã lưu vào MediaMTX."""
+        store = ConfigStore(self.config_path)
+        camera = store.create_camera(
+            CameraCreate(name="Camera", source="rtsp://camera/stream"),
+            camera_id="camera-01",
+        )
+        tester = FakeCameraConnectionTester()
+        application = create_app(
+            self.settings,
+            monitor_factory=lambda settings: FakeMonitorService(settings),
+            config_store=store,
+            camera_connection_tester=tester,
+        )
+
+        with TestClient(application) as client:
+            self.assertEqual(client.get("/health").status_code, 200)
+
+        self.assertEqual(tester.restored, [(camera.id, camera)])
+
+    # ────────────────────────────────────────────────────────────────────────
+
+    def test_lifespan_stays_available_when_camera_restore_fails(self) -> None:
+        """Lỗi MediaMTX khi startup không được làm API ngừng phục vụ."""
+        store = ConfigStore(self.config_path)
+        store.create_camera(
+            CameraCreate(name="Camera", source="rtsp://camera/stream"),
+            camera_id="camera-01",
+        )
+        tester = FakeCameraConnectionTester(
+            CameraConnectionError("MediaMTX tạm thời không sẵn sàng.")
+        )
+        application = create_app(
+            self.settings,
+            monitor_factory=lambda settings: FakeMonitorService(settings),
+            config_store=store,
+            camera_connection_tester=tester,
+        )
+
+        with TestClient(application) as client:
+            self.assertEqual(client.get("/health").status_code, 200)
 
     # ─────────────────────────────────────────────────────────────────────────
 

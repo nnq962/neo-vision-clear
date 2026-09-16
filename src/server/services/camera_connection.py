@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from server.models.camera import CameraCreate
+from server.models.camera import CameraConfig, CameraCreate
 from server.services.mediamtx import MediaMtxClient, MediaMtxError
 
 
@@ -43,6 +43,21 @@ class CameraConnectionTester:
             # Bước 2: đăng ký lỗi phải rollback path vừa thêm.
             self._remove_quietly(path_name)
             raise
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def restore(self, path_name: str, camera: CameraConfig) -> None:
+        """Khôi phục path camera đã lưu sau khi MediaMTX khởi động lại."""
+        try:
+            # Bước 1: xóa cấu hình cũ nếu còn để thao tác có tính lặp lại.
+            self._client.delete_path(path_name)
+
+            # Bước 2: tạo lại path từ source đã lưu; MediaMTX sẽ tự kết nối lại.
+            self._client.add_source_path(path_name, camera.source)
+        except MediaMtxError as exc:
+            raise CameraConnectionError(
+                "Không thể khôi phục camera trên MediaMTX."
+            ) from exc
 
     # ─────────────────────────────────────────────────────────────────────────
 

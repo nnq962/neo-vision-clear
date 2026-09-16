@@ -4,6 +4,7 @@ from server.routes.calibration import router as calibration_router
 from server.routes.cameras import router as cameras_router
 from server.routes.health import router as health_router
 from server.routes.runtime import router as runtime_router
+from server.routes.uart import router as uart_router
 from server.routes.websocket import router as websocket_router
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "cameras_router",
     "health_router",
     "runtime_router",
+    "uart_router",
     "websocket_router",
 ]

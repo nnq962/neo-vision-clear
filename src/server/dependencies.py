@@ -6,6 +6,7 @@ from server.services.calibration import CalibrationService
 from server.services.camera_connection import CameraConnectionTester
 from server.services.config_store import ConfigStore
 from server.services.monitor import MonitorService
+from server.services.uart import UartService
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,3 +56,14 @@ def get_camera_connection_tester(
     if tester is None:
         raise RuntimeError("Camera connection tester chưa được khởi tạo.")
     return tester
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def get_uart_service(connection: HTTPConnection) -> UartService:
+    """Lấy UART service độc lập được gắn vào application state."""
+    service = getattr(connection.app.state, "uart_service", None)
+    if service is None:
+        raise RuntimeError("UART service chưa được khởi tạo.")
+    return service

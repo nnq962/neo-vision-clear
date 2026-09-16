@@ -1,8 +1,9 @@
 """Kiểm thử quy trình đăng ký camera qua MediaMTX."""
 
+from datetime import datetime, timezone
 import unittest
 
-from server.models.camera import CameraCreate
+from server.models.camera import CameraConfig, CameraCreate
 from server.services.camera_connection import (
     CameraConnectionError,
     CameraConnectionTester,
@@ -84,6 +85,26 @@ class CameraConnectionTesterTestCase(unittest.TestCase):
 
         self.assertEqual(client.added, [("camera-01", self.source)])
         self.assertEqual(client.deleted, [])
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_restore_replaces_persisted_camera_path(self) -> None:
+        """Khôi phục phải xóa path cũ rồi thêm lại source đã lưu."""
+        client = FakeMediaMtxClient([])
+        tester = CameraConnectionTester(client=client)
+        now = datetime.now(timezone.utc)
+        camera = CameraConfig(
+            id="camera-01",
+            name="Camera",
+            source=self.source,
+            created_at=now,
+            updated_at=now,
+        )
+
+        tester.restore(camera.id, camera)
+
+        self.assertEqual(client.deleted, ["camera-01"])
+        self.assertEqual(client.added, [("camera-01", self.source)])
 
     # ─────────────────────────────────────────────────────────────────────────
 

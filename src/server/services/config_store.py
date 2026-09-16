@@ -19,6 +19,7 @@ from server.models.calibration import (
 )
 from server.models.camera import CameraConfig, CameraCreate, CameraUpdate
 from server.models.config import AppConfigDocument, RuntimeConfig
+from server.models.uart import UartConfig
 
 
 class ConfigError(RuntimeError):
@@ -264,6 +265,25 @@ class ConfigStore:
             # Bước 2: ghi nguyên tử chỉ sau khi toàn bộ schema hợp lệ.
             self._write_unlocked(validated)
             return validated.runtime.model_copy(deep=True)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def get_uart(self) -> UartConfig:
+        """Trả bản sao cấu hình UART hiện tại hoặc giá trị mặc định."""
+        with self._lock:
+            # Bước 1: đọc cùng document để UART không có tệp cấu hình riêng.
+            return self._read_unlocked().uart.model_copy(deep=True)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def update_uart(self, uart: UartConfig) -> UartConfig:
+        """Lưu nguyên tử cấu hình UART mà không thay đổi camera hoặc runtime."""
+        with self._lock:
+            # Bước 1: thay cấu hình trên document mới đọc để giữ mọi phần còn lại.
+            document = self._read_unlocked()
+            document.uart = uart.model_copy(deep=True)
+            self._write_unlocked(document)
+            return document.uart.model_copy(deep=True)
 
     # ─────────────────────────────────────────────────────────────────────────
 

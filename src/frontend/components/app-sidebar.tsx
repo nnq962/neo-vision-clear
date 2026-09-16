@@ -3,6 +3,7 @@ import type { ComponentProps } from "react"
 import {
   CameraIcon,
   ChartNoAxesCombinedIcon,
+  CableIcon,
   FocusIcon,
   ScanLineIcon,
   SettingsIcon,
@@ -34,6 +35,11 @@ const data = {
       title: "Calibration",
       url: "/calibration",
       icon: <FocusIcon />,
+    },
+    {
+      title: "UART",
+      url: "/uart",
+      icon: <CableIcon />,
     },
     {
       title: "Cài đặt",

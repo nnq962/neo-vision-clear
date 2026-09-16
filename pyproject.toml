@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=2.2.6,<3",
     "opencv-python==4.13.0.92",
     "pillow>=10.0.0",
+    "pyserial>=3.5",
     "pytz>=2026.2",
     "pyyaml>=6.0.3",
     "torch>=2.14.0",
@@ -43,6 +44,7 @@ packages = [
     "depth_anything_v2.util",
     "media_sources",
     "media_sources.readers",
+    "uart",
     "utils",
 ]
 package-dir = { "" = "src", utils = "utils" }

@@ -10,12 +10,14 @@ from server.routes import (
     cameras_router,
     health_router,
     runtime_router,
+    uart_router,
     websocket_router,
 )
 from server.services.calibration import CalibrationService
 from server.services.camera_connection import CameraConnectionTester
 from server.services.config_store import ConfigStore
 from server.services.monitor import MonitorService
+from server.services.uart import UartService
 from server.settings import ServerSettings
 
 
@@ -28,6 +30,7 @@ def create_app(
     config_store: ConfigStore | None = None,
     camera_connection_tester: CameraConnectionTester | None = None,
     calibration_service: CalibrationService | None = None,
+    uart_service: UartService | None = None,
 ) -> FastAPI:
     """Tạo FastAPI app với cấu hình và monitor factory có thể thay trong test."""
     # Bước 1: đọc và kiểm tra cấu hình trước khi dựng application.
@@ -51,10 +54,15 @@ def create_app(
         calibration_service
         or CalibrationService(resolved_settings, resolved_config_store)
     )
+    application.state.uart_service = uart_service or UartService(
+        resolved_config_store,
+        lambda: application.state.monitor_service.read_snapshot(),
+    )
     application.include_router(cameras_router)
     application.include_router(calibration_router)
     application.include_router(health_router)
     application.include_router(runtime_router)
+    application.include_router(uart_router)
     application.include_router(websocket_router)
     return application
 

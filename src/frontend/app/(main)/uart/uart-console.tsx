@@ -89,7 +89,7 @@ function uartWebSocketUrl(): string {
     return `${baseUrl}/ws/uart`
   }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${protocol}//${window.location.hostname}:8000/ws/uart`
+  return `${protocol}//${window.location.host}/ws/uart`
 }
 
 function isUartStatus(value: unknown): value is UartStatus {

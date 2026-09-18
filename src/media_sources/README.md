@@ -246,6 +246,8 @@ Các option này có thể truyền vào `MediaSources` hoặc `create_media_sou
 with MediaSources(
     ["rtsp://cam1", "rtsp://cam2"],
     use_gstreamer=True,
+    jetson_hardware_decode=True,
+    gstreamer_latency_ms=0,
     reconnect=True,
     reconnect_forever=True,
     reconnect_delay=2.0,
@@ -257,6 +259,8 @@ with MediaSources(
 | Option | Mặc định | Ý nghĩa |
 |---|---:|---|
 | `use_gstreamer` | `True` | thử GStreamer trước, fallback FFMPEG |
+| `jetson_hardware_decode` | `True` | tự dùng `nvv4l2decoder` và `nvvidconv` khi chạy trên Jetson |
+| `gstreamer_latency_ms` | `0` | jitter buffer RTSP; tăng lên 50–200 ms khi mạng không ổn định |
 | `reconnect` | `True` | tự reconnect khi mất tín hiệu |
 | `reconnect_delay` | `2.0` | thời gian chờ ban đầu giữa các lần reconnect |
 | `reconnect_forever` | `True` | reconnect vô hạn |
@@ -265,6 +269,23 @@ with MediaSources(
 | `read_timeout_ms` | `5000` | timeout đọc frame |
 
 Kwargs không áp dụng cho loại reader hiện tại sẽ được bỏ qua và log ở mức DEBUG.
+
+Trên Jetson, pipeline H.264 tương đương:
+
+```text
+rtspsrc → rtph264depay → h264parse → nvv4l2decoder
+        → nvvidconv → BGRx → videoconvert → BGR → appsink
+```
+
+H.265 dùng `rtph265depay` và `h265parse` với cùng decoder NVIDIA. Frame được giữ
+trong NVMM trong quá trình giải mã, rồi chuyển về system memory ở BGRx vì API cuối
+cùng cần `numpy.ndarray` BGR. Nếu pipeline NVIDIA không mở được, reader fallback
+sang FFmpeg. Trên máy không phải Jetson, GStreamer tiếp tục dùng `avdec_h264` hoặc
+`avdec_h265`.
+
+Tối ưu này chỉ hoạt động khi `cv2.getBuildInformation()` báo `GStreamer: YES`.
+Wheel OpenCV PyPI thường không bật GStreamer; khi đó reader sẽ cảnh báo và dùng
+FFmpeg dù plugin NVIDIA đã có trên hệ điều hành.
 
 ## Logging
 

@@ -17,6 +17,7 @@ from walkway_monitor.detection.components import (
 )
 from walkway_monitor.detection.models import (
     AnalysisDiagnostics,
+    AnalysisTimings,
     CorridorSnapshot,
     DetectionOutput,
 )
@@ -109,6 +110,8 @@ class WalkwayAnalyzer:
 
     def process(self, current_depth: np.ndarray) -> DetectionOutput:
         """Xử lý một depth map và trả về phép đo cùng các mask debug."""
+        process_started = time.perf_counter()
+
         # Bước 1: chuẩn hóa input về float32 và bảo đảm depth map hiện tại có
         # cùng kích thước với baseline, không chứa NaN hoặc giá trị vô cực.
         depth = np.asarray(current_depth, dtype=np.float32)
@@ -127,6 +130,7 @@ class WalkwayAnalyzer:
         # nhóm pixel khớp baseline nhất được giữ lại, vì vậy người hoặc vật cản
         # không kéo lệch toàn bộ depth map. Khi CLI tắt alignment, dùng nguyên
         # depth raw và đặt scale=1, shift=0.
+        alignment_started = time.perf_counter()
         if self._config.depth_alignment:
             aligned, scale, shift = align_depth(
                 depth,
@@ -137,9 +141,11 @@ class WalkwayAnalyzer:
         else:
             aligned = depth
             scale, shift = 1.0, 0.0
+        alignment_seconds = time.perf_counter() - alignment_started
 
         # Bước 3: làm mượt depth đã căn chỉnh bằng đúng Gaussian kernel đã dùng
         # cho reference để giảm các dao động nhỏ theo không gian.
+        mask_started = time.perf_counter()
         smoothed = cv2.GaussianBlur(
             aligned,
             (self._config.depth_blur_kernel, self._config.depth_blur_kernel),
@@ -175,9 +181,11 @@ class WalkwayAnalyzer:
             measurement_mask,
             self._display_minimum_area,
         )
+        mask_seconds = time.perf_counter() - mask_started
 
         # Bước 8: chiếu mask sang raster BEV và đo footprint rộng nhất có vùng
         # tâm nối liên tục từ đầu tới cuối hành lang.
+        bev_started = time.perf_counter()
         bev_changed_mask = self._metric_bev.warp_mask(changed_mask)
         capacity = measure_route_capacity(
             bev_changed_mask,
@@ -188,6 +196,7 @@ class WalkwayAnalyzer:
             self._metric_bev.minimum_world_x,
             self._metric_bev.minimum_world_y,
         )
+        bev_seconds = time.perf_counter() - bev_started
 
         # Bước 9: tách snapshot nghiệp vụ khỏi chẩn đoán căn chỉnh nội bộ.
         captured_at = time.time()
@@ -209,6 +218,12 @@ class WalkwayAnalyzer:
             alignment_inlier_ratio=self._config.alignment_inlier_ratio,
             alignment_enabled=self._config.depth_alignment,
         )
+        timings = AnalysisTimings(
+            total_seconds=time.perf_counter() - process_started,
+            alignment_seconds=alignment_seconds,
+            mask_seconds=mask_seconds,
+            bev_seconds=bev_seconds,
+        )
 
         # Bước 10: tăng frame index và chỉ trả các ảnh thật sự được UI sử dụng.
         self._frame_index += 1
@@ -216,6 +231,7 @@ class WalkwayAnalyzer:
             snapshot=snapshot,
             route_capacity=capacity,
             diagnostics=diagnostics,
+            timings=timings,
             raw_depth=depth,
             aligned_depth=aligned,
             check_area_mask=self._check_area_mask,

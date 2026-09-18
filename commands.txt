@@ -21,3 +21,6 @@ uv run walkway-server
 
 
 uv run walkway-monitor detect --source 'rtsp://user:password@camera.local:554/stream' --baseline data/baselines/example/baseline.npz --minimum-difference 0.08 --no-depth-heatmaps
+
+
+export LD_PRELOAD=/lib/aarch64-linux-gnu/libGLdispatch.so.0

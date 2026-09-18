@@ -1,5 +1,3 @@
-import "server-only"
-
 import type {
   BaselineConfig,
   CalibrationPoint,
@@ -126,8 +124,7 @@ function mapRunStatus(value: unknown): CalibrationRunStatus | undefined {
 
 export async function getBaselines(): Promise<BaselineConfig[]> {
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-    const response = await fetch(`${apiUrl}/api/calibration`, { cache: "no-store" })
+    const response = await fetch("/api/calibration", { cache: "no-store" })
     if (!response.ok) return []
 
     const payload: unknown = await response.json()
@@ -153,12 +150,11 @@ export async function getBaselineArtifactAvailability(
 export async function getCalibrationRunStatuses(
   baselineIds: string[]
 ): Promise<Record<string, CalibrationRunStatus>> {
-  const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
   const statuses = await Promise.all(
     baselineIds.map(async (baselineId) => {
       try {
         const response = await fetch(
-          `${apiUrl}/api/calibration/${encodeURIComponent(baselineId)}/status`,
+          `/api/calibration/${encodeURIComponent(baselineId)}/status`,
           { cache: "no-store" }
         )
         if (!response.ok) return undefined

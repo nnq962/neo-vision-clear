@@ -61,12 +61,23 @@ class AnalysisDiagnostics:
 
 
 @dataclass(frozen=True)
+class AnalysisTimings:
+    """Thời gian các nhóm xử lý chính của analyzer tính theo giây."""
+
+    total_seconds: float
+    alignment_seconds: float
+    mask_seconds: float
+    bev_seconds: float
+
+
+@dataclass(frozen=True)
 class DetectionOutput:
     """Snapshot nghiệp vụ và các ảnh trung gian cần cho giao diện debug."""
 
     snapshot: CorridorSnapshot
     route_capacity: RouteCapacity
     diagnostics: AnalysisDiagnostics
+    timings: AnalysisTimings
     raw_depth: np.ndarray
     aligned_depth: np.ndarray
     check_area_mask: np.ndarray

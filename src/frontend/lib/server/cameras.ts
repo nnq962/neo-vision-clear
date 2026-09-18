@@ -1,5 +1,3 @@
-import "server-only"
-
 import type { Camera } from "@/lib/types/camera"
 
 type CameraApiPayload = {
@@ -29,8 +27,7 @@ function isCameraApiPayload(value: unknown): value is CameraApiPayload {
 
 export async function getCurrentCamera(): Promise<Camera | undefined> {
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-    const response = await fetch(`${apiUrl}/api/cameras`, { cache: "no-store" })
+    const response = await fetch("/api/cameras", { cache: "no-store" })
     if (!response.ok) return undefined
 
     const cameras: unknown = await response.json()

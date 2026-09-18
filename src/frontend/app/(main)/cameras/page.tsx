@@ -1,10 +1,21 @@
+"use client"
+
+import { useEffect, useState } from "react"
+
 import { CameraForm } from "./camera-form"
 import { getCurrentCamera } from "@/lib/server/cameras"
+import type { Camera } from "@/lib/types/camera"
 
-export const dynamic = "force-dynamic"
+export default function CamerasPage() {
+  const [camera, setCamera] = useState<Camera>()
+  const [loaded, setLoaded] = useState(false)
 
-export default async function CamerasPage() {
-  const initialCamera = await getCurrentCamera()
+  useEffect(() => {
+    void getCurrentCamera().then((value) => {
+      setCamera(value)
+      setLoaded(true)
+    })
+  }, [])
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -14,7 +25,11 @@ export default async function CamerasPage() {
           Thêm một nguồn RTSP để sử dụng trong hệ thống.
         </p>
       </div>
-      <CameraForm initialCamera={initialCamera} />
+      {loaded ? (
+        <CameraForm initialCamera={camera} />
+      ) : (
+        <p className="text-sm text-muted-foreground">Đang tải cấu hình camera...</p>
+      )}
     </div>
   )
 }

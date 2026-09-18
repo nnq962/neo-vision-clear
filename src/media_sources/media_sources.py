@@ -15,7 +15,8 @@ class MediaSources:
     lazy: `__init__` chỉ dựng reader, chỉ mở khi vào `with`/lần `__next__` đầu tiên.
 
     kwargs được chuyển tiếp cho reader tương ứng (RtspReader: reconnect, reconnect_delay,
-    max_reconnect_attempts, reconnect_forever, use_gstreamer, open_timeout_ms, read_timeout_ms).
+    max_reconnect_attempts, reconnect_forever, use_gstreamer,
+    jetson_hardware_decode, gstreamer_latency_ms, open_timeout_ms, read_timeout_ms).
     kwargs dư thừa bị lọc bỏ (log DEBUG).
     """
 

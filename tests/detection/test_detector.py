@@ -95,6 +95,10 @@ class WalkwayAnalyzerTestCase(unittest.TestCase):
         self.assertEqual(int(np.count_nonzero(output.changed_mask)), 0)
         self.assertAlmostEqual(output.diagnostics.alignment_scale, 1.4, places=4)
         self.assertAlmostEqual(output.diagnostics.alignment_shift, 0.35, places=4)
+        self.assertGreaterEqual(output.timings.total_seconds, 0.0)
+        self.assertGreaterEqual(output.timings.alignment_seconds, 0.0)
+        self.assertGreaterEqual(output.timings.mask_seconds, 0.0)
+        self.assertGreaterEqual(output.timings.bev_seconds, 0.0)
 
     # ─────────────────────────────────────────────────────────────────────────
 

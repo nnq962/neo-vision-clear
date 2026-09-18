@@ -1,5 +1,3 @@
-import "server-only"
-
 import type { RuntimeConfig, RuntimeProcessStatus } from "@/lib/types/runtime"
 
 type RuntimeApiPayload = {
@@ -141,8 +139,7 @@ export function mapRuntimeConfig(payload: RuntimeApiPayload): RuntimeConfig {
 
 export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-    const response = await fetch(`${apiUrl}/api/runtime`, { cache: "no-store" })
+    const response = await fetch("/api/runtime", { cache: "no-store" })
     if (!response.ok) return DEFAULT_RUNTIME_CONFIG
 
     const payload: unknown = await response.json()
@@ -156,8 +153,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
 
 export async function getRuntimeProcessStatus(): Promise<RuntimeProcessStatus> {
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-    const response = await fetch(`${apiUrl}/api/runtime/status`, {
+    const response = await fetch("/api/runtime/status", {
       cache: "no-store",
     })
     if (!response.ok) return DEFAULT_RUNTIME_PROCESS_STATUS

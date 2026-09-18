@@ -1,5 +1,3 @@
-"use server"
-
 import type {
   BaselineConfig,
   CalibrationPoint,
@@ -196,11 +194,10 @@ export async function saveBaseline(
   }
 
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
     const response = await fetch(
       baselineId
-        ? `${apiUrl}/api/calibration/${encodeURIComponent(baselineId)}`
-        : `${apiUrl}/api/calibration`,
+        ? `/api/calibration/${encodeURIComponent(baselineId)}`
+        : "/api/calibration",
       {
         method: baselineId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -234,9 +231,8 @@ export async function startCalibration(
   baselineId: string
 ): Promise<CalibrationRunResult> {
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
     const response = await fetch(
-      `${apiUrl}/api/calibration/${encodeURIComponent(baselineId)}/run`,
+      `/api/calibration/${encodeURIComponent(baselineId)}/run`,
       { method: "POST", cache: "no-store" }
     )
     const payload: unknown = await response.json()
@@ -270,9 +266,8 @@ export async function saveAndStartBaseline(
   const started = await startCalibration(saved.baseline.id)
   if (started.status === "error" || !started.run) {
     // Hoàn tác bản ghi vừa tạo nếu worker không nhận job, tránh baseline rỗng.
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
     await fetch(
-      `${apiUrl}/api/calibration/${encodeURIComponent(saved.baseline.id)}`,
+      `/api/calibration/${encodeURIComponent(saved.baseline.id)}`,
       { method: "DELETE", cache: "no-store" }
     ).catch(() => undefined)
     return {

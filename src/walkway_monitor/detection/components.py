@@ -55,18 +55,16 @@ def filter_components_by_area(mask: np.ndarray, minimum_area: int) -> np.ndarray
         return mask.astype(np.uint8, copy=True)
 
     # Bước 1: gắn nhãn mọi vùng thay đổi độc lập trong mask.
-    count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+    _count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
         mask.astype(np.uint8),
         connectivity=8,
     )
 
-    # Bước 2: chỉ sao chép các vùng đủ lớn sang mask kết quả.
-    filtered = np.zeros_like(mask, dtype=np.uint8)
-    for component_index in range(1, count):
-        area = int(stats[component_index, cv2.CC_STAT_AREA])
-        if area >= minimum_area:
-            filtered[labels == component_index] = 255
-    return filtered
+    # Bước 2: lập bảng giữ/bỏ theo label rồi ánh xạ toàn ảnh đúng một lượt.
+    # Tránh quét lại toàn bộ labels cho từng đốm nhiễu khi mask bị phân mảnh.
+    keep = stats[:, cv2.CC_STAT_AREA] >= minimum_area
+    keep[0] = False
+    return (keep[labels].astype(np.uint8) * 255)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -212,27 +210,47 @@ def _find_bottleneck_row(
     valid_rows: np.ndarray,
 ) -> int:
     """Chọn hàng có khoảng trống hữu dụng hẹp nhất trên tuyến liên thông."""
-    widths: list[int] = []
-    rows: list[int] = []
-    for row_value in valid_rows:
-        row = int(row_value)
-        runs = _true_runs(free_mask[row])
-        if route_component is not None:
-            route_columns = np.flatnonzero(route_component[row])
-            if route_columns.size == 0:
-                continue
-            runs = tuple(
-                (start, end)
-                for start, end in runs
-                if np.any((route_columns >= start) & (route_columns < end))
-            )
-        rows.append(row)
-        widths.append(max((end - start for start, end in runs), default=0))
+    # Bước 1: tìm đầu, cuối của mọi đoạn trống trên tất cả hàng trong một lượt.
+    # Cách này tránh cấp phát hàng nghìn mảng nhỏ khi duyệt từng hàng bằng Python.
+    rows = np.asarray(valid_rows, dtype=np.intp)
+    free_rows = np.asarray(free_mask[rows], dtype=bool)
+    padded = np.pad(free_rows, ((0, 0), (1, 1)), constant_values=False)
+    transitions = np.diff(padded.astype(np.int8, copy=False), axis=1)
+    start_rows, starts = np.nonzero(transitions == 1)
+    end_rows, ends = np.nonzero(transitions == -1)
+    if not np.array_equal(start_rows, end_rows):
+        raise RuntimeError("Không thể ghép các đoạn trống trên raster BEV.")
 
-    # Chọn phần tử giữa của vùng nút thắt để nhãn ít nhảy khi nhiều hàng bằng nhau.
-    minimum_width = min(widths)
-    candidates = [row for row, width in zip(rows, widths) if width == minimum_width]
-    return candidates[len(candidates) // 2]
+    # Bước 2: nếu đã có tuyến xuyên suốt, chỉ giữ đoạn trống chứa ít nhất một
+    # tâm footprint thuộc tuyến đó, đúng với quy tắc đo cũ.
+    eligible_rows = np.ones(rows.size, dtype=bool)
+    if route_component is not None:
+        route_rows = np.asarray(route_component[rows], dtype=bool)
+        eligible_rows = np.any(route_rows, axis=1)
+        route_prefix = np.pad(
+            np.cumsum(route_rows, axis=1, dtype=np.int32),
+            ((0, 0), (1, 0)),
+            constant_values=0,
+        )
+        intersects_route = (
+            route_prefix[start_rows, ends]
+            > route_prefix[start_rows, starts]
+        )
+        start_rows = start_rows[intersects_route]
+        starts = starts[intersects_route]
+        ends = ends[intersects_route]
+
+    # Bước 3: gom độ rộng lớn nhất theo hàng trực tiếp trong NumPy.
+    maximum_widths = np.zeros(rows.size, dtype=np.int32)
+    np.maximum.at(maximum_widths, start_rows, ends - starts)
+    if not np.any(eligible_rows):
+        raise RuntimeError("Tuyến liên thông không đi qua hàng BEV hợp lệ nào.")
+
+    # Bước 4: chọn phần tử giữa của vùng nút thắt để nhãn ít nhảy khi nhiều
+    # hàng có cùng độ rộng nhỏ nhất.
+    minimum_width = int(np.min(maximum_widths[eligible_rows]))
+    candidates = rows[eligible_rows & (maximum_widths == minimum_width)]
+    return int(candidates[len(candidates) // 2])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

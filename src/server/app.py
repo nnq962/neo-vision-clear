@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from server.lifespan import MonitorFactory, create_lifespan
 from server.routes import (
@@ -64,6 +67,17 @@ def create_app(
     application.include_router(runtime_router)
     application.include_router(uart_router)
     application.include_router(websocket_router)
+
+    # Bước 3: đặt static frontend sau toàn bộ API và WebSocket để các route
+    # nghiệp vụ luôn được ưu tiên trước mount bắt mọi đường dẫn còn lại.
+    if resolved_settings.frontend_directory is not None:
+        frontend_directory = Path(resolved_settings.frontend_directory)
+        if frontend_directory.is_dir():
+            application.mount(
+                "/",
+                StaticFiles(directory=frontend_directory, html=True),
+                name="frontend",
+            )
     return application
 
 

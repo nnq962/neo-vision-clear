@@ -213,7 +213,7 @@ function overviewWebSocketUrl(): string {
     return `${baseUrl}/ws/overview`
   }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${protocol}//${window.location.hostname}:8000/ws/overview`
+  return `${protocol}//${window.location.host}/ws/overview`
 }
 
 export function OverviewDashboard({

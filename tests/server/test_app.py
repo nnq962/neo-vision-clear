@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from fastapi.testclient import TestClient
+from starlette.routing import Mount
 
 from server.app import create_app
 from server.models.camera import CameraConfig, CameraCreate
@@ -88,6 +89,34 @@ class ServerAppTestCase(unittest.TestCase):
         self.settings = ServerSettings(
             camera_config_path=str(self.config_path),
             snapshot_max_age_seconds=5.0,
+        )
+
+    # ────────────────────────────────────────────────────────────────────────
+
+    def test_mounts_built_frontend_after_api_routes(self) -> None:
+        """Frontend tĩnh phải được mount sau API để không che route nghiệp vụ."""
+        frontend_directory = self.config_path.parent / "frontend"
+        frontend_directory.mkdir()
+        (frontend_directory / "index.html").write_text(
+            "<title>Neo Vision Clear</title>",
+            encoding="utf-8",
+        )
+        settings = ServerSettings(
+            camera_config_path=str(self.config_path),
+            frontend_directory=str(frontend_directory),
+        )
+
+        # Bước 1: mount bắt mọi đường dẫn phải đứng cuối danh sách route.
+        application = create_app(settings)
+        frontend_route = application.routes[-1]
+
+        self.assertIsInstance(frontend_route, Mount)
+        self.assertEqual(frontend_route.name, "frontend")
+        self.assertTrue(
+            any(
+                getattr(route, "path", None) == "/api/runtime"
+                for route in application.routes[:-1]
+            )
         )
 
     # ────────────────────────────────────────────────────────────────────────

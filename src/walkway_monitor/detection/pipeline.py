@@ -60,8 +60,14 @@ class DetectionPipeline:
         last_time = run_started
         window_started = run_started
         window_frames = 0
+        window_source_time = 0.0
+        window_resize_time = 0.0
         window_inference_time = 0.0
         window_analysis_time = 0.0
+        window_alignment_time = 0.0
+        window_mask_time = 0.0
+        window_bev_time = 0.0
+        window_publish_time = 0.0
         window_render_time = 0.0
         LOGGER.info(
             "Bắt đầu phân tích full frame ở độ phân giải %dx%d.",
@@ -70,24 +76,39 @@ class DetectionPipeline:
         )
         try:
             with MediaSources(source, **media_options) as media:
-                for frames, _metas in media:
+                media_iterator = iter(media)
+                while True:
+                    # Bước 1: đo cả thời gian chờ/giải mã frame trong reader.
+                    source_started = time.perf_counter()
+                    try:
+                        frames, _metas = next(media_iterator)
+                    except StopIteration:
+                        break
+                    source_time = time.perf_counter() - source_started
+
                     # Cho phép lifespan của server dừng worker mà không phải
                     # kết thúc cưỡng bức process đang chạy.
                     if stop_event is not None and stop_event.is_set():
                         break
+                    resize_started = time.perf_counter()
                     frame = resize_to_baseline(frames[0], self._baseline)
+                    resize_time = time.perf_counter() - resize_started
 
                     inference_started = time.perf_counter()
                     depth = self._estimator.predict(frame)
                     inference_time = time.perf_counter() - inference_started
 
-                    analysis_started = time.perf_counter()
                     output = self._analyzer.process(depth)
+                    analysis_time = output.timings.total_seconds
+
+                    # Bước 2: callback có thể gồm contour, khóa snapshot hoặc
+                    # tích hợp bên ngoài nên được đo riêng khỏi analyzer.
+                    publish_started = time.perf_counter()
                     if on_snapshot is not None:
                         on_snapshot(output.snapshot)
                     if on_output is not None:
                         on_output(output)
-                    analysis_time = time.perf_counter() - analysis_started
+                    publish_time = time.perf_counter() - publish_started
                     processed_frames += 1
 
                     now = time.perf_counter()
@@ -106,8 +127,14 @@ class DetectionPipeline:
                         render_time = time.perf_counter() - render_started
 
                     window_frames += 1
+                    window_source_time += source_time
+                    window_resize_time += resize_time
                     window_inference_time += inference_time
                     window_analysis_time += analysis_time
+                    window_alignment_time += output.timings.alignment_seconds
+                    window_mask_time += output.timings.mask_seconds
+                    window_bev_time += output.timings.bev_seconds
+                    window_publish_time += publish_time
                     window_render_time += render_time
                     log_time = time.perf_counter()
                     window_elapsed = log_time - window_started
@@ -118,15 +145,27 @@ class DetectionPipeline:
                         self._log_performance(
                             frames=window_frames,
                             elapsed=window_elapsed,
+                            source_time=window_source_time,
+                            resize_time=window_resize_time,
                             inference_time=window_inference_time,
                             analysis_time=window_analysis_time,
+                            alignment_time=window_alignment_time,
+                            mask_time=window_mask_time,
+                            bev_time=window_bev_time,
+                            publish_time=window_publish_time,
                             render_time=window_render_time,
                             snapshot=output.snapshot,
                         )
                         window_started = log_time
                         window_frames = 0
+                        window_source_time = 0.0
+                        window_resize_time = 0.0
                         window_inference_time = 0.0
                         window_analysis_time = 0.0
+                        window_alignment_time = 0.0
+                        window_mask_time = 0.0
+                        window_bev_time = 0.0
+                        window_publish_time = 0.0
                         window_render_time = 0.0
                     if should_stop:
                         break
@@ -168,17 +207,32 @@ class DetectionPipeline:
     def _log_performance(
         frames: int,
         elapsed: float,
+        source_time: float,
+        resize_time: float,
         inference_time: float,
         analysis_time: float,
+        alignment_time: float,
+        mask_time: float,
+        bev_time: float,
+        publish_time: float,
         render_time: float,
         snapshot: CorridorSnapshot,
     ) -> None:
         """Ghi hiệu năng và snapshot mới nhất trong một cửa sổ thời gian."""
         frame_count = max(frames, 1)
+        measured_analysis_time = alignment_time + mask_time + bev_time
+        other_analysis_time = max(analysis_time - measured_analysis_time, 0.0)
         performance = (
             f"FPS={frames / max(elapsed, 1e-6):.2f} | "
+            f"source={source_time * 1000 / frame_count:.1f}ms | "
+            f"resize={resize_time * 1000 / frame_count:.1f}ms | "
             f"inference={inference_time * 1000 / frame_count:.1f}ms | "
-            f"analysis={analysis_time * 1000 / frame_count:.1f}ms | "
+            f"analysis={analysis_time * 1000 / frame_count:.1f}ms "
+            f"(align={alignment_time * 1000 / frame_count:.1f}, "
+            f"mask={mask_time * 1000 / frame_count:.1f}, "
+            f"bev={bev_time * 1000 / frame_count:.1f}, "
+            f"other={other_analysis_time * 1000 / frame_count:.1f}) | "
+            f"publish={publish_time * 1000 / frame_count:.1f}ms | "
             f"render={render_time * 1000 / frame_count:.1f}ms"
         )
         LOGGER.info(

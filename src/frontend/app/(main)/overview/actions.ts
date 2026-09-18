@@ -1,5 +1,3 @@
-"use server"
-
 import { mapRuntimeProcessStatus } from "@/lib/server/runtime"
 import type { RuntimeProcessStatus } from "@/lib/types/runtime"
 
@@ -25,8 +23,7 @@ async function controlRuntime(
   command: "start" | "stop"
 ): Promise<RuntimeControlResult> {
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-    const response = await fetch(`${apiUrl}/api/runtime/${command}`, {
+    const response = await fetch(`/api/runtime/${command}`, {
       method: "POST",
       cache: "no-store",
     })

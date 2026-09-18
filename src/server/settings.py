@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 
 from walkway_monitor.config import DEFAULT_BASELINES_DIRECTORY
+
+
+DEFAULT_FRONTEND_DIRECTORY = str(
+    Path(__file__).resolve().parents[1] / "frontend" / "out"
+)
 
 
 @dataclass(frozen=True)
@@ -16,6 +22,7 @@ class ServerSettings:
     baselines_directory: str = DEFAULT_BASELINES_DIRECTORY
     mediamtx_rtsp_url: str = "rtsp://127.0.0.1:8554"
     checkpoint_path: str | None = None
+    frontend_directory: str | None = DEFAULT_FRONTEND_DIRECTORY
     host: str = "0.0.0.0"
     port: int = 8000
     snapshot_max_age_seconds: float = 2.0
@@ -43,6 +50,9 @@ class ServerSettings:
                 "rtsp://127.0.0.1:8554",
             ),
             checkpoint_path=checkpoint,
+            frontend_directory=(
+                os.getenv("NVC_FRONTEND_PATH", DEFAULT_FRONTEND_DIRECTORY) or None
+            ),
             host=os.getenv("WALKWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("WALKWAY_PORT", "8000")),
             snapshot_max_age_seconds=float(

@@ -1,5 +1,3 @@
-"use server"
-
 import type { RuntimeConfig } from "@/lib/types/runtime"
 
 const NO_BASELINE_VALUE = "__none__"
@@ -103,8 +101,7 @@ export async function saveRuntimeConfig(
   }
 
   try {
-    const apiUrl = process.env.SERVER_API_URL ?? "http://127.0.0.1:8000"
-    const response = await fetch(`${apiUrl}/api/runtime`, {
+    const response = await fetch("/api/runtime", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

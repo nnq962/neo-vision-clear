@@ -6,7 +6,10 @@ import unittest
 
 import numpy as np
 
-from walkway_monitor.detection.components import measure_route_capacity
+from walkway_monitor.detection.components import (
+    filter_components_by_area,
+    measure_route_capacity,
+)
 
 
 class RouteCapacityTestCase(unittest.TestCase):
@@ -82,6 +85,22 @@ class RouteCapacityTestCase(unittest.TestCase):
         self.assertEqual(capacity.maximum_passable_width_meters, 0.0)
         self.assertAlmostEqual(capacity.bottleneck_y_meters, 1.0)
         self.assertEqual(capacity.bottleneck_free_x_ranges_meters, ())
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_component_filter_keeps_only_regions_above_minimum_area(self) -> None:
+        """Bộ lọc component phải bỏ đốm nhỏ mà giữ nguyên vùng đủ diện tích."""
+        # Bước 1: tạo một đốm một pixel và một vùng chữ nhật sáu pixel.
+        mask = np.zeros((8, 10), dtype=np.uint8)
+        mask[1, 1] = 255
+        mask[3:5, 5:8] = 255
+
+        filtered = filter_components_by_area(mask, minimum_area=4)
+
+        # Bước 2: kiểm tra bảng tra label không làm đổi vùng được giữ lại.
+        self.assertEqual(int(np.count_nonzero(filtered)), 6)
+        self.assertEqual(int(filtered[1, 1]), 0)
+        np.testing.assert_array_equal(filtered[3:5, 5:8], 255)
 
     # ─────────────────────────────────────────────────────────────────────────
 

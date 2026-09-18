@@ -210,6 +210,22 @@ Package `server` nằm độc lập với `walkway_monitor`. FastAPI chỉ khở
 service khi startup; camera và model được mở sau qua API runtime. Cấu hình hạ
 tầng của server được đọc từ biến môi trường:
 
+### Build và phục vụ frontend
+
+Frontend được static export để FastAPI phục vụ cùng origin, không cần chạy
+Node.js trong production. Dùng Node.js 20 trở lên để build:
+
+```bash
+cd src/frontend
+npm ci
+npm run build
+cd ../..
+```
+
+Kết quả nằm tại `src/frontend/out` và được `walkway-server` tự động mount ở `/`.
+Có thể đổi đường dẫn bằng `NVC_FRONTEND_PATH`; đặt biến này thành chuỗi rỗng để
+tắt frontend tĩnh. REST API tiếp tục nằm dưới `/api`, WebSocket nằm dưới `/ws`.
+
 ```bash
 NVC_CONFIG_PATH='data/config.json' \
 NVC_BASELINES_PATH='data/baselines' \

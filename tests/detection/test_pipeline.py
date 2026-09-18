@@ -1,10 +1,12 @@
 """Kiểm thử resize full frame về đúng kích thước baseline."""
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
-from walkway_monitor.detection.pipeline import resize_to_baseline
+from walkway_monitor.config import DetectionConfig
+from walkway_monitor.detection.pipeline import DetectionPipeline, resize_to_baseline
 from tests.detection.test_detector import make_baseline
 
 
@@ -26,6 +28,68 @@ class DetectionPipelineTestCase(unittest.TestCase):
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
         with self.assertRaises(RuntimeError):
             resize_to_baseline(frame, baseline)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_run_collects_stage_timings_without_changing_frame_count(self) -> None:
+        """Pipeline có timing chi tiết vẫn phải xử lý đủ frame từ iterator."""
+        baseline = make_baseline()
+        frame = np.zeros((60, 80, 3), dtype=np.uint8)
+
+        class FakeEstimator:
+            """Estimator giả trả depth của baseline."""
+
+            def predict(self, _frame: np.ndarray) -> np.ndarray:
+                """Trả bản sao depth để analyzer có thể xử lý độc lập."""
+                return baseline.reference_depth.copy()
+
+        class FakeMedia:
+            """Nguồn giả phát đúng hai frame rồi kết thúc."""
+
+            def __init__(self) -> None:
+                """Khởi tạo số frame đã phát bằng không."""
+                self.count = 0
+
+            # ─────────────────────────────────────────────────────────────────────────
+
+            def __enter__(self) -> "FakeMedia":
+                """Trả chính nguồn giả khi mở context."""
+                return self
+
+            # ─────────────────────────────────────────────────────────────────────────
+
+            def __exit__(self, *_args: object) -> None:
+                """Đóng context mà không cần giải phóng tài nguyên."""
+
+            # ─────────────────────────────────────────────────────────────────────────
+
+            def __iter__(self) -> "FakeMedia":
+                """Trả chính đối tượng làm iterator."""
+                return self
+
+            # ─────────────────────────────────────────────────────────────────
+
+            def __next__(self):
+                """Phát hai frame theo giao diện batch của MediaSources."""
+                if self.count >= 2:
+                    raise StopIteration
+                self.count += 1
+                return [frame.copy()], [None]
+
+        pipeline = DetectionPipeline(
+            FakeEstimator(),
+            baseline,
+            DetectionConfig(),
+            display=False,
+            log_interval=0,
+        )
+        with patch(
+            "walkway_monitor.detection.pipeline.MediaSources",
+            return_value=FakeMedia(),
+        ):
+            processed = pipeline.run("fake")
+
+        self.assertEqual(processed, 2)
 
 
 if __name__ == "__main__":

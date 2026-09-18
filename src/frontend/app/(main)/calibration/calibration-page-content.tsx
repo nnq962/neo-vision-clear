@@ -66,6 +66,15 @@ const encoderItems = [
   { label: "ViT-L — chất lượng cao", value: "vitl" },
 ]
 
+const inputSizeItems = [
+  { label: "140 px — rất nhanh", value: "140" },
+  { label: "196 px — ưu tiên tốc độ", value: "196" },
+  { label: "224 px — nhanh hơn", value: "224" },
+  { label: "280 px — nhanh", value: "280" },
+  { label: "392 px — cân bằng", value: "392" },
+  { label: "518 px — chất lượng cao", value: "518" },
+]
+
 type CalibrationDraft = {
   name: string
   encoder: BaselineConfig["encoder"]
@@ -394,20 +403,33 @@ export function CalibrationPageContent({
                       </div>
                       <div className="grid gap-2">
                         <Label htmlFor="input-size">Input size</Label>
-                        <Input
-                          id="input-size"
+                        <Select
                           name="input_size"
-                          type="number"
-                          min="14"
+                          items={inputSizeItems}
                           value={draft.inputSize}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              inputSize: event.target.value,
-                            }))
-                          }
-                          required
-                        />
+                          onValueChange={(value) => {
+                            if (value) {
+                              setDraft((current) => ({
+                                ...current,
+                                inputSize: value,
+                              }))
+                            }
+                          }}
+                        >
+                          <SelectTrigger id="input-size" className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectLabel>Kích thước suy luận</SelectLabel>
+                              {inputSizeItems.map((item) => (
+                                <SelectItem key={item.value} value={item.value}>
+                                  {item.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
 

@@ -3,21 +3,22 @@ name = "neo-vision-clear"
 version = "0.1.0"
 description = "Fixed-camera occupancy detection demo using OpenCV"
 readme = "README.md"
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.9,<3.10"
 dependencies = [
     "colorlog>=6.10.1",
-    "fastapi>=0.141.1",
-    "numpy>=2.2.6,<3",
+    "eval-type-backport>=0.2.2",
+    "fastapi>=0.115,<0.129",
+    "numpy>=2.0,<2.1",
     "opencv-python==4.13.0.92",
     "pillow>=10.0.0",
     "pyserial>=3.5",
     "pytz>=2026.2",
     "pyyaml>=6.0.3",
-    "torch>=2.14.0",
-    "torchvision>=0.29.0",
-    "uvicorn>=0.52.4",
-    "websockets>=16.1.1",
-    "yt-dlp>=2026.6.9",
+    "torch>=2.8,<2.9",
+    "torchvision>=0.23,<0.24",
+    "uvicorn>=0.34,<0.52",
+    "websockets>=15,<16",
+    "yt-dlp>=2025.1,<2025.10",
 ]
 
 [project.scripts]
@@ -49,10 +50,7 @@ packages = [
 ]
 package-dir = { "" = "src", utils = "utils" }
 
-[tool.uv.sources]
-opencv-python = { path = "wheels/pc-x86_64/opencv_python-4.13.0.92-cp310-cp310-linux_x86_64.whl" }
-
 [dependency-groups]
 dev = [
-    "httpx2>=2.12.0",
+    "httpx>=0.27,<0.29",
 ]

@@ -1,5 +1,7 @@
 """Kiểm thử quy trình đăng ký camera qua MediaMTX."""
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 import unittest
 

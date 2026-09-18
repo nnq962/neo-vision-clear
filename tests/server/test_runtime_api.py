@@ -1,5 +1,7 @@
 """Kiểm thử REST API và quan hệ dữ liệu của cấu hình runtime."""
 
+from __future__ import annotations
+
 from pathlib import Path
 import tempfile
 import unittest

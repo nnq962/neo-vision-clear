@@ -1,5 +1,7 @@
 """Kiểm thử lưu JSON và REST API cấu hình camera."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 import tempfile

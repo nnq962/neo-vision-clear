@@ -37,6 +37,8 @@ import type { RuntimeProcessStatus } from "@/lib/types/runtime"
 
 import { startRuntime, stopRuntime } from "./actions"
 
+const OVERVIEW_REFRESH_INTERVAL_MS = 100
+
 type ActiveBaseline = {
   id: string
   name: string
@@ -297,6 +299,35 @@ export function OverviewDashboard({
     let socket: WebSocket | undefined
     let requestTimer: number | undefined
     let reconnectTimer: number | undefined
+    let requestInFlight = false
+
+    function scheduleSnapshotRequest(delay = OVERVIEW_REFRESH_INTERVAL_MS) {
+      if (cancelled || document.hidden) return
+      if (requestTimer !== undefined) window.clearTimeout(requestTimer)
+      requestTimer = window.setTimeout(() => {
+        requestTimer = undefined
+        requestSnapshot()
+      }, delay)
+    }
+
+    function requestSnapshot() {
+      if (cancelled || document.hidden) return
+      if (
+        socket?.readyState !== WebSocket.OPEN ||
+        socket.bufferedAmount > 0 ||
+        requestInFlight
+      ) {
+        scheduleSnapshotRequest()
+        return
+      }
+      requestInFlight = true
+      socket.send(
+        JSON.stringify({
+          type: "get_overview_info",
+          request_id: `overview-${Date.now()}`,
+        })
+      )
+    }
 
     function connect() {
       if (cancelled) return
@@ -306,44 +337,44 @@ export function OverviewDashboard({
         if (cancelled || !socket) return
         setConnection("open")
         setReading({ status: "warming_up" })
-        const requestSnapshot = () => {
-          if (
-            document.hidden ||
-            socket?.readyState !== WebSocket.OPEN ||
-            socket.bufferedAmount > 0
-          ) return
-          socket.send(
-            JSON.stringify({
-              type: "get_overview_info",
-              request_id: `overview-${Date.now()}`,
-            })
-          )
-        }
         requestSnapshot()
-        requestTimer = window.setInterval(requestSnapshot, 1000)
       }
       socket.onmessage = (event) => {
+        requestInFlight = false
         try {
           const parsed = parseCorridorReading(JSON.parse(String(event.data)))
           if (parsed) setReading(parsed)
         } catch {
           setReading({ status: "error", error: "WebSocket trả JSON không hợp lệ." })
         }
+        scheduleSnapshotRequest()
       }
       socket.onerror = () => setConnection("error")
       socket.onclose = () => {
-        if (requestTimer !== undefined) window.clearInterval(requestTimer)
+        if (requestTimer !== undefined) window.clearTimeout(requestTimer)
+        requestInFlight = false
         if (cancelled) return
         setConnection("error")
         reconnectTimer = window.setTimeout(connect, 2000)
       }
     }
 
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (requestTimer !== undefined) window.clearTimeout(requestTimer)
+        requestTimer = undefined
+        return
+      }
+      if (!requestInFlight) scheduleSnapshotRequest(0)
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
     connect()
     return () => {
       cancelled = true
-      if (requestTimer !== undefined) window.clearInterval(requestTimer)
+      if (requestTimer !== undefined) window.clearTimeout(requestTimer)
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
       socket?.close()
     }
   }, [shouldStream])
@@ -567,7 +598,7 @@ export function OverviewDashboard({
               Kết quả mới nhất
             </h2>
             <p className="text-sm text-muted-foreground">
-              Các phép đo được cập nhật mỗi giây từ worker runtime.
+              Các phép đo được cập nhật khoảng 10 lần mỗi giây từ worker runtime.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

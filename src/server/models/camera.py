@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing_extensions import Annotated
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator

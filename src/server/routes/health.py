@@ -1,6 +1,8 @@
 """Route health-check phản ánh trạng thái snapshot camera."""
 
-from typing import Annotated
+from __future__ import annotations
+
+from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends
 

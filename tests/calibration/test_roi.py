@@ -28,18 +28,18 @@ class RoiDefinitionTestCase(unittest.TestCase):
     def test_select_polygon_closes_window_when_cancelled(self) -> None:
         """Hủy chọn ROI vẫn phải đóng cửa sổ OpenCV đã tạo."""
         frame = np.zeros((50, 100, 3), dtype=np.uint8)
-        with (
-            patch("walkway_monitor.calibration.roi_selector.cv2.namedWindow"),
-            patch("walkway_monitor.calibration.roi_selector.cv2.setMouseCallback"),
-            patch("walkway_monitor.calibration.roi_selector.cv2.imshow"),
-            patch(
+        with patch(
+            "walkway_monitor.calibration.roi_selector.cv2.namedWindow"
+        ), patch(
+            "walkway_monitor.calibration.roi_selector.cv2.setMouseCallback"
+        ), patch(
+            "walkway_monitor.calibration.roi_selector.cv2.imshow"
+        ), patch(
                 "walkway_monitor.calibration.roi_selector.cv2.waitKey",
                 return_value=ord("q"),
-            ),
-            patch(
+            ), patch(
                 "walkway_monitor.calibration.roi_selector.cv2.destroyWindow"
-            ) as destroy_window,
-        ):
+            ) as destroy_window:
             with self.assertRaises(KeyboardInterrupt):
                 select_polygon(frame)
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from threading import Event
+from typing import Callable
 
 import cv2
 import numpy as np

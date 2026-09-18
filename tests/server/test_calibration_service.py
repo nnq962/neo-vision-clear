@@ -96,18 +96,14 @@ class CalibrationServiceTestCase(unittest.TestCase):
             )
 
             # Worker dùng nguồn và estimator giả nhưng chạy pipeline thật.
-            with (
-                patch(
+            with patch(
                     "walkway_monitor.calibration.pipeline.MediaSources",
                     FakeMediaSources,
-                ),
-                patch(
+                ), patch(
                     "walkway_monitor.calibration.pipeline.cv2.imshow"
-                ) as imshow_mock,
-                patch(
+                ) as imshow_mock, patch(
                     "server.services.calibration.release_worker_memory"
-                ) as cleanup_mock,
-            ):
+                ) as cleanup_mock:
                 started = service.start(baseline.id)
                 result = started
                 for _attempt in range(100):

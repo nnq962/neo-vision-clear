@@ -1,5 +1,7 @@
 """Kiểm thử tích hợp pipeline calibration bằng dependency giả."""
 
+from __future__ import annotations
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,23 +74,24 @@ class CalibrationPipelineTestCase(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "baseline.npz"
-            with (
-                patch(
+            with patch(
                     "walkway_monitor.calibration.pipeline.MediaSources",
                     FakeMediaSources,
-                ),
-                patch(
+                ), patch(
                     "walkway_monitor.calibration.pipeline.select_polygon",
                     return_value=roi,
-                ),
-                patch(
+                ), patch(
                     "walkway_monitor.calibration.pipeline.wait_for_empty_confirmation"
-                ),
-                patch("walkway_monitor.calibration.pipeline.cv2.imshow"),
-                patch("walkway_monitor.calibration.pipeline.cv2.waitKey", return_value=-1),
-                patch("walkway_monitor.calibration.pipeline.cv2.destroyWindow"),
-                patch("walkway_monitor.calibration.pipeline.cv2.destroyAllWindows"),
-            ):
+                ), patch(
+                    "walkway_monitor.calibration.pipeline.cv2.imshow"
+                ), patch(
+                    "walkway_monitor.calibration.pipeline.cv2.waitKey",
+                    return_value=-1,
+                ), patch(
+                    "walkway_monitor.calibration.pipeline.cv2.destroyWindow"
+                ), patch(
+                    "walkway_monitor.calibration.pipeline.cv2.destroyAllWindows"
+                ):
                 artifact = pipeline.run("video.mp4", output)
             self.assertTrue(output.is_file())
             self.assertTrue(output.with_suffix(".json").is_file())
@@ -114,30 +117,22 @@ class CalibrationPipelineTestCase(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "headless.npz"
-            with (
-                patch(
+            with patch(
                     "walkway_monitor.calibration.pipeline.MediaSources",
                     FakeMediaSources,
-                ),
-                patch(
+                ), patch(
                     "walkway_monitor.calibration.pipeline.select_polygon"
-                ) as select_polygon_mock,
-                patch(
+                ) as select_polygon_mock, patch(
                     "walkway_monitor.calibration.pipeline.wait_for_empty_confirmation"
-                ) as confirmation_mock,
-                patch(
+                ) as confirmation_mock, patch(
                     "walkway_monitor.calibration.pipeline.cv2.imshow"
-                ) as imshow_mock,
-                patch(
+                ) as imshow_mock, patch(
                     "walkway_monitor.calibration.pipeline.cv2.waitKey"
-                ) as wait_key_mock,
-                patch(
+                ) as wait_key_mock, patch(
                     "walkway_monitor.calibration.pipeline.cv2.destroyWindow"
-                ) as destroy_window_mock,
-                patch(
+                ) as destroy_window_mock, patch(
                     "walkway_monitor.calibration.pipeline.cv2.destroyAllWindows"
-                ) as destroy_all_mock,
-            ):
+                ) as destroy_all_mock:
                 pipeline.run(
                     "video.mp4",
                     output,

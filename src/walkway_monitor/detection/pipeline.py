@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import threading
 import time
+from typing import Callable
 
 import cv2
 import numpy as np

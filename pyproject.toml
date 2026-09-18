@@ -3,22 +3,22 @@ name = "neo-vision-clear"
 version = "0.1.0"
 description = "Fixed-camera occupancy detection demo using OpenCV"
 readme = "README.md"
-requires-python = ">=3.9,<3.10"
+requires-python = ">=3.8,<3.9"
 dependencies = [
-    "colorlog>=6.10.1",
+    "colorlog>=6.9,<6.10",
     "eval-type-backport>=0.2.2",
-    "fastapi>=0.115,<0.129",
-    "numpy>=2.0,<2.1",
-    "opencv-python==4.13.0.92",
-    "pillow>=10.0.0",
+    "fastapi>=0.115,<0.124",
+    "numpy>=1.24,<1.25",
+    "opencv-python>=4.10,<4.12",
+    "pillow>=10,<11",
     "pyserial>=3.5",
     "pytz>=2026.2",
     "pyyaml>=6.0.3",
-    "torch>=2.8,<2.9",
-    "torchvision>=0.23,<0.24",
-    "uvicorn>=0.34,<0.52",
-    "websockets>=15,<16",
-    "yt-dlp>=2025.1,<2025.10",
+    "torch>=2.4,<2.5",
+    "torchvision>=0.19,<0.20",
+    "uvicorn>=0.30,<0.34",
+    "websockets>=13,<14",
+    "yt-dlp>=2024.1,<2025",
 ]
 
 [project.scripts]

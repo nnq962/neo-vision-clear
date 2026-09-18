@@ -109,12 +109,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Không mở cửa sổ OpenCV; phù hợp khi xử lý video tự động.",
     )
-    detection_parser.add_argument(
+    depth_heatmap_group = detection_parser.add_mutually_exclusive_group()
+    depth_heatmap_group.add_argument(
         "--depth-heatmaps",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Bật hoặc tắt hai panel heatmap depth trong cửa sổ debug.",
+        dest="depth_heatmaps",
+        action="store_true",
+        help="Bật hai panel heatmap depth trong cửa sổ debug.",
     )
+    depth_heatmap_group.add_argument(
+        "--no-depth-heatmaps",
+        dest="depth_heatmaps",
+        action="store_false",
+        help="Tắt hai panel heatmap depth trong cửa sổ debug.",
+    )
+    detection_parser.set_defaults(depth_heatmaps=True)
     detection_parser.add_argument(
         "--log-interval",
         type=float,

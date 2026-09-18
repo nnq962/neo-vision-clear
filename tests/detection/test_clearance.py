@@ -1,5 +1,7 @@
 """Kiểm thử phép đo bề rộng tuyến liên thông trên BEV."""
 
+from __future__ import annotations
+
 import unittest
 
 import numpy as np

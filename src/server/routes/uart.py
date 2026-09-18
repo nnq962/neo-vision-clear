@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+from typing import List
+
+from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -80,7 +82,7 @@ def disconnect_uart(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("/api/uart/messages", response_model=list[UartMessageEvent])
+@router.get("/api/uart/messages", response_model=List[UartMessageEvent])
 def get_uart_messages(
     service: Annotated[UartService, Depends(get_uart_service)],
 ) -> list[UartMessageEvent]:

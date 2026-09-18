@@ -1,6 +1,10 @@
 """REST API quản lý cấu hình camera."""
 
-from typing import Annotated
+from __future__ import annotations
+
+from typing import List
+
+from typing_extensions import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -24,7 +28,7 @@ router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("", response_model=list[CameraResponse])
+@router.get("", response_model=List[CameraResponse])
 def list_cameras(
     store: Annotated[ConfigStore, Depends(get_config_store)],
 ) -> list[CameraResponse]:

@@ -1,6 +1,10 @@
 """REST API đọc và lưu cấu hình calibration."""
 
-from typing import Annotated
+from __future__ import annotations
+
+from typing import List
+
+from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
@@ -31,7 +35,7 @@ router = APIRouter(prefix="/api/calibration", tags=["calibration"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("", response_model=list[CalibrationResponse])
+@router.get("", response_model=List[CalibrationResponse])
 def list_baselines(
     store: Annotated[ConfigStore, Depends(get_config_store)],
 ) -> list[CalibrationResponse]:

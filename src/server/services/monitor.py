@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 import threading
-from typing import Literal
+from typing import Callable, Literal
 
 from server.models.calibration import CalibrationConfig
 from server.models.camera import CameraConfig

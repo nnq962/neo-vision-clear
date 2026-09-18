@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal, Tuple
+
+from typing_extensions import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,7 +13,7 @@ from walkway_monitor.detection.zones import DifferenceZone
 
 
 NormalizedCoordinate = Annotated[float, Field(ge=0.0, le=1.0)]
-NormalizedPoint = tuple[NormalizedCoordinate, NormalizedCoordinate]
+NormalizedPoint = Tuple[NormalizedCoordinate, NormalizedCoordinate]
 
 
 class SnapshotRequest(BaseModel):

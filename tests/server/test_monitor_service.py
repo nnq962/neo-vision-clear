@@ -222,16 +222,14 @@ class MonitorServiceTestCase(unittest.TestCase):
 
     def test_memory_cleanup_collects_python_and_cuda_cache(self) -> None:
         """Cleanup gọi GC và trả cache CUDA khi accelerator khả dụng."""
-        with (
-            patch("server.services.worker_resources.gc.collect") as collect,
-            patch(
+        with patch(
+            "server.services.worker_resources.gc.collect"
+        ) as collect, patch(
                 "server.services.worker_resources.torch.cuda.is_available",
                 return_value=True,
-            ),
-            patch(
+            ), patch(
                 "server.services.worker_resources.torch.cuda.empty_cache"
-            ) as empty_cache,
-        ):
+            ) as empty_cache:
             release_worker_memory("runtime")
 
         collect.assert_called_once_with()

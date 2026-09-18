@@ -1,6 +1,6 @@
 """REST API đọc và cập nhật cấu hình runtime detection."""
 
-from typing import Annotated
+from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 

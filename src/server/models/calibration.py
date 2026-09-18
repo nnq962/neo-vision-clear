@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-Point = tuple[float, float]
+Point = Tuple[float, float]
 
 
 class CalibrationFields(BaseModel):

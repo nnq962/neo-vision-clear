@@ -48,24 +48,11 @@ def artifact_path_for_id(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def legacy_artifact_path_for_id(
-    baselines_directory: str | Path,
-    baseline_id: str,
-) -> Path:
-    """Tạo đường dẫn NPZ phẳng cũ để hỗ trợ dữ liệu đã tạo trước đây."""
-    # Bước 1: áp dụng cùng kiểm tra ID như cấu trúc thư mục chuẩn.
-    safe_id = _validate_baseline_id(baseline_id)
-    return Path(baselines_directory) / f"{safe_id}.npz"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def delete_artifacts_for_id(
     baselines_directory: str | Path,
     baseline_id: str,
 ) -> tuple[Path, ...]:
-    """Xóa các artifact chuẩn và phẳng cũ thuộc đúng một baseline."""
+    """Xóa các artifact trong thư mục của đúng một baseline."""
     # Bước 1: xác định thư mục chuẩn bằng helper đã kiểm tra baseline ID.
     canonical_npz = artifact_path_for_id(baselines_directory, baseline_id)
     canonical_directory = canonical_npz.parent
@@ -80,17 +67,6 @@ def delete_artifacts_for_id(
     if canonical_directory.is_dir() and not any(canonical_directory.iterdir()):
         canonical_directory.rmdir()
 
-    # Bước 3: dọn cả bốn file phẳng của phiên bản cũ nếu chúng còn tồn tại.
-    legacy_npz = legacy_artifact_path_for_id(baselines_directory, baseline_id)
-    for artifact in (
-        legacy_npz,
-        legacy_npz.with_suffix(".json"),
-        legacy_npz.with_suffix(".preview.jpg"),
-        legacy_npz.with_suffix(".depth.jpg"),
-    ):
-        if artifact.is_file():
-            artifact.unlink()
-            removed.append(artifact)
     return tuple(removed)
 
 
@@ -254,10 +230,10 @@ def _load_world_coordinates(
     roi_points: np.ndarray,
 ) -> WorldCoordinates | None:
     """Đọc hệ tọa độ thực tùy chọn từ file JSON cùng tên baseline."""
-    # Bước 1: giữ tương thích với baseline cũ chưa có file JSON đi kèm.
+    # Bước 1: metadata JSON là thành phần bắt buộc của artifact baseline.
     json_path = baseline_path.with_suffix(".json")
     if not json_path.is_file():
-        return None
+        raise FileNotFoundError(f"Không tìm thấy metadata baseline: {json_path}")
 
     # Bước 2: đọc JSON và bỏ qua khi chưa khai báo tọa độ thực.
     try:

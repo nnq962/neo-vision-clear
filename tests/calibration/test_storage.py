@@ -92,8 +92,8 @@ class BaselineStorageTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def test_delete_artifacts_removes_new_and_legacy_layouts(self) -> None:
-        """Xóa baseline phải dọn đủ artifact mới lẫn file phẳng cũ."""
+    def test_delete_artifacts_removes_baseline_directory(self) -> None:
+        """Xóa baseline phải dọn artifact trong thư mục ID tương ứng."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             canonical_directory = root / "abc123"
@@ -105,12 +105,9 @@ class BaselineStorageTestCase(unittest.TestCase):
                 "baseline.depth.jpg",
             ):
                 (canonical_directory / filename).touch()
-            for suffix in (".npz", ".json", ".preview.jpg", ".depth.jpg"):
-                (root / f"abc123{suffix}").touch()
-
             removed = delete_artifacts_for_id(root, "abc123")
 
-            self.assertEqual(len(removed), 8)
+            self.assertEqual(len(removed), 4)
             self.assertFalse(canonical_directory.exists())
             self.assertEqual(list(root.iterdir()), [])
 

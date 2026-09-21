@@ -250,14 +250,14 @@ Có thể đổi thư mục gốc bằng biến môi trường `NVC_BASELINES_PA
 
 ### Cấu hình runtime
 
-Runtime được lưu chung trong `data/config.json`. Camera được lấy từ trường `camera`, còn
-artifact được suy ra từ `active_baseline_id`, nên không cần lặp URL hoặc đường dẫn file:
+Runtime được lưu chung trong `data/config.json`. Mỗi ID trong `active_baseline_ids`
+trỏ tới một baseline và camera tương ứng; không cần lặp URL hoặc đường dẫn artifact:
 
 ```json
 {
   "runtime": {
     "enabled": false,
-    "active_baseline_id": null,
+    "active_baseline_ids": [],
     "snapshot_max_age_seconds": 2.0,
     "log_interval_seconds": 2.0,
     "detection": {
@@ -279,7 +279,7 @@ API cấu hình chỉ lưu tham số. Runtime được điều khiển riêng đ
 chờ nạp model, inference hoặc camera đóng kết nối:
 
 ```bash
-# Bắt đầu worker nền từ camera và active_baseline_id đã lưu
+# Bắt đầu worker nền từ các camera trong active_baseline_ids đã lưu
 curl -X POST http://127.0.0.1:8000/api/runtime/start
 
 # Đọc trạng thái: stopped, starting, running, stopping hoặc failed
@@ -304,9 +304,13 @@ GET /api/runtime
 PUT /api/runtime
 ```
 
-Khi `enabled=true`, `active_baseline_id` là bắt buộc, phải tồn tại và phải thuộc camera
-hiện tại. Thay hoặc xóa camera, hay xóa baseline đang active, sẽ tự đưa runtime về trạng
-thái tắt an toàn.
+Khi `enabled=true`, phải chọn ít nhất một baseline. Mỗi camera chỉ được chọn một
+baseline, và các baseline trong cùng batch phải dùng chung encoder, input size và
+process width. Batch size được suy ra trực tiếp từ số ID đã chọn (tối đa 32); mỗi
+camera đóng góp một frame cho mỗi lượt inference. Không có trường
+`inference_batch_size` trong API hay `data/config.json`. Xóa camera hoặc baseline
+đang active sẽ loại các ID liên quan khỏi runtime; runtime tự tắt nếu không còn
+baseline nào được chọn.
 
 Robot kết nối tới `ws://<host>:8000/ws/corridor` và gửi:
 

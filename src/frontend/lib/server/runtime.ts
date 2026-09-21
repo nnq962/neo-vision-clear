@@ -2,7 +2,7 @@ import type { RuntimeConfig, RuntimeProcessStatus } from "@/lib/types/runtime"
 
 type RuntimeApiPayload = {
   enabled: boolean
-  active_baseline_id: string | null
+  active_baseline_ids: string[]
   snapshot_max_age_seconds: number
   log_interval_seconds: number
   detection: {
@@ -20,7 +20,7 @@ type RuntimeApiPayload = {
 
 type RuntimeProcessApiPayload = {
   status: "stopped" | "starting" | "running" | "stopping" | "failed"
-  active_baseline_id: string | null
+  active_baseline_ids: string[]
   snapshot_age_ms: number | null
   error: string | null
   started_at: string | null
@@ -28,10 +28,12 @@ type RuntimeProcessApiPayload = {
 
 export const DEFAULT_RUNTIME_PROCESS_STATUS: RuntimeProcessStatus = {
   status: "stopped",
+  activeBaselineIds: [],
 }
 
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   enabled: false,
+  activeBaselineIds: [],
   snapshotMaxAgeSeconds: 2,
   logIntervalSeconds: 2,
   detection: {
@@ -57,8 +59,8 @@ function isRuntimeApiPayload(value: unknown): value is RuntimeApiPayload {
   const detector = detection as Record<string, unknown>
   return (
     typeof payload.enabled === "boolean" &&
-    (payload.active_baseline_id === null ||
-      typeof payload.active_baseline_id === "string") &&
+    Array.isArray(payload.active_baseline_ids) &&
+    payload.active_baseline_ids.every((item) => typeof item === "string") &&
     typeof payload.snapshot_max_age_seconds === "number" &&
     typeof payload.log_interval_seconds === "number" &&
     typeof detector.noise_multiplier === "number" &&
@@ -89,8 +91,8 @@ export function mapRuntimeProcessStatus(
     return undefined
   }
   if (
-    payload.active_baseline_id !== null &&
-    typeof payload.active_baseline_id !== "string"
+    !Array.isArray(payload.active_baseline_ids) ||
+    !payload.active_baseline_ids.every((item) => typeof item === "string")
   ) {
     return undefined
   }
@@ -109,7 +111,7 @@ export function mapRuntimeProcessStatus(
   const typedPayload = payload as RuntimeProcessApiPayload
   return {
     status: typedPayload.status,
-    activeBaselineId: typedPayload.active_baseline_id ?? undefined,
+    activeBaselineIds: typedPayload.active_baseline_ids,
     snapshotAgeMs: typedPayload.snapshot_age_ms ?? undefined,
     error: typedPayload.error ?? undefined,
     startedAt: typedPayload.started_at ?? undefined,
@@ -119,7 +121,7 @@ export function mapRuntimeProcessStatus(
 export function mapRuntimeConfig(payload: RuntimeApiPayload): RuntimeConfig {
   return {
     enabled: payload.enabled,
-    activeBaselineId: payload.active_baseline_id ?? undefined,
+    activeBaselineIds: payload.active_baseline_ids,
     snapshotMaxAgeSeconds: payload.snapshot_max_age_seconds,
     logIntervalSeconds: payload.log_interval_seconds,
     detection: {

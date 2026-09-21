@@ -6,7 +6,7 @@ import {
   getBaselineArtifactAvailability,
   getBaselines,
 } from "@/lib/server/calibrations"
-import { getCurrentCamera } from "@/lib/server/cameras"
+import { getCameras } from "@/lib/server/cameras"
 import { getRuntimeConfig } from "@/lib/server/runtime"
 import type { BaselineConfig } from "@/lib/types/calibration"
 import type { CameraIdentity } from "@/lib/types/camera"
@@ -15,7 +15,7 @@ import type { RuntimeConfig } from "@/lib/types/runtime"
 import { RuntimeSettingsForm } from "./runtime-settings-form"
 
 type SettingsPageData = {
-  camera?: CameraIdentity
+  cameras: CameraIdentity[]
   baselines: BaselineConfig[]
   artifactAvailability: Record<string, boolean>
   runtime: RuntimeConfig
@@ -26,19 +26,16 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void Promise.all([
-      getCurrentCamera(),
+      getCameras(),
       getBaselines(),
       getRuntimeConfig(),
-    ]).then(async ([camera, baselines, runtime]) => {
-      const cameraBaselines = baselines.filter(
-        (baseline) => baseline.cameraId === camera?.id
-      )
+    ]).then(async ([cameras, baselines, runtime]) => {
       const artifactAvailability = await getBaselineArtifactAvailability(
-        cameraBaselines.map((baseline) => baseline.id)
+        baselines.map((baseline) => baseline.id)
       )
       setData({
-        camera: camera ? { id: camera.id, name: camera.name } : undefined,
-        baselines: cameraBaselines,
+        cameras: cameras.map(({ id, name }) => ({ id, name })),
+        baselines,
         artifactAvailability,
         runtime,
       })
@@ -51,7 +48,7 @@ export default function SettingsPage() {
 
   return (
     <RuntimeSettingsForm
-      camera={data.camera}
+      cameras={data.cameras}
       baselines={data.baselines}
       artifactAvailability={data.artifactAvailability}
       initialRuntime={data.runtime}

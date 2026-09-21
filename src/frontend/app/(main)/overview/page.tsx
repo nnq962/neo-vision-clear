@@ -6,7 +6,7 @@ import {
   getBaselineArtifactAvailability,
   getBaselines,
 } from "@/lib/server/calibrations"
-import { getCurrentCamera } from "@/lib/server/cameras"
+import { getCameras } from "@/lib/server/cameras"
 import {
   DEFAULT_RUNTIME_PROCESS_STATUS,
   getRuntimeConfig,
@@ -19,13 +19,15 @@ import type { RuntimeProcessStatus } from "@/lib/types/runtime"
 import { OverviewDashboard } from "./overview-dashboard"
 
 type OverviewPageData = {
-  camera?: CameraIdentity
-  activeBaseline?: {
-    id: string
-    name: string
-    ready: boolean
-    roiPoints: CalibrationPoint[]
-  }
+  sources: Array<{
+    camera: CameraIdentity
+    baseline: {
+      id: string
+      name: string
+      ready: boolean
+      roiPoints: CalibrationPoint[]
+    }
+  }>
   processStatus: RuntimeProcessStatus
 }
 
@@ -34,27 +36,30 @@ export default function OverviewPage() {
 
   useEffect(() => {
     void Promise.all([
-      getCurrentCamera(),
+      getCameras(),
       getBaselines(),
       getRuntimeConfig(),
       getRuntimeProcessStatus(),
-    ]).then(async ([camera, baselines, runtime, processStatus]) => {
-      const baseline = baselines.find(
-        (item) => item.id === runtime.activeBaselineId
+    ]).then(async ([cameras, baselines, runtime, processStatus]) => {
+      const availability = await getBaselineArtifactAvailability(
+        runtime.activeBaselineIds
       )
-      const availability = runtime.activeBaselineId
-        ? await getBaselineArtifactAvailability([runtime.activeBaselineId])
-        : {}
+      const sources = runtime.activeBaselineIds.flatMap((baselineId) => {
+        const baseline = baselines.find((item) => item.id === baselineId)
+        const camera = cameras.find((item) => item.id === baseline?.cameraId)
+        if (!baseline || !camera) return []
+        return [{
+          camera: { id: camera.id, name: camera.name },
+          baseline: {
+            id: baseline.id,
+            name: baseline.name,
+            ready: availability[baseline.id] === true,
+            roiPoints: baseline.roiPoints,
+          },
+        }]
+      })
       setData({
-        camera: camera ? { id: camera.id, name: camera.name } : undefined,
-        activeBaseline: runtime.activeBaselineId
-          ? {
-              id: runtime.activeBaselineId,
-              name: baseline?.name ?? runtime.activeBaselineId,
-              ready: availability[runtime.activeBaselineId] === true,
-              roiPoints: baseline?.roiPoints ?? [],
-            }
-          : undefined,
+        sources,
         processStatus,
       })
     })
@@ -66,8 +71,7 @@ export default function OverviewPage() {
 
   return (
     <OverviewDashboard
-      camera={data.camera}
-      activeBaseline={data.activeBaseline}
+      sources={data.sources}
       initialProcessStatus={data.processStatus ?? DEFAULT_RUNTIME_PROCESS_STATUS}
     />
   )

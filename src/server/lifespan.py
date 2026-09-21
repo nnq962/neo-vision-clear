@@ -32,10 +32,9 @@ def create_lifespan(
         service = monitor_factory(settings)
         app.state.monitor_service = service
 
-        # Bước 2: MediaMTX không lưu path động sau restart, nên khôi
-        # phục camera singleton từ config trước khi frontend tạo player.
-        camera = app.state.config_store.get_current_camera()
-        if camera is not None:
+        # Bước 2: MediaMTX không lưu path động sau restart, nên khôi phục toàn bộ
+        # camera từ config trước khi frontend tạo các player.
+        for camera in app.state.config_store.list_cameras():
             try:
                 app.state.camera_connection_tester.restore(camera.id, camera)
                 LOGGER.info(

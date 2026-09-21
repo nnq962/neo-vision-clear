@@ -114,13 +114,13 @@ class CameraApiTestCase(unittest.TestCase):
 
         saved = json.loads(self.config_path.read_text(encoding="utf-8"))
         self.assertEqual(saved["version"], 2)
-        self.assertEqual(saved["camera"]["source"], source)
+        self.assertEqual(saved["cameras"][0]["source"], source)
         self.assertEqual(saved["baselines"], [])
         self.assertEqual(
             saved["runtime"],
             RuntimeConfig().model_dump(mode="json"),
         )
-        self.assertEqual(set(saved["camera"]), {
+        self.assertEqual(set(saved["cameras"][0]), {
             "name",
             "source",
             "open_timeout_ms",
@@ -132,8 +132,8 @@ class CameraApiTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def test_new_camera_replaces_current_camera(self) -> None:
-        """POST lần hai phải ghi đè JSON và dọn path MediaMTX cũ."""
+    def test_new_camera_is_appended_without_replacing_existing_camera(self) -> None:
+        """POST lần hai phải nối camera mới và giữ nguyên MediaMTX path cũ."""
         first = self.client.post(
             "/api/cameras",
             json={"name": "Camera 1", "source": "rtsp://camera-1/stream"},
@@ -144,13 +144,35 @@ class CameraApiTestCase(unittest.TestCase):
         ).json()
 
         cameras = self.client.get("/api/cameras").json()
-        self.assertEqual(len(cameras), 1)
-        self.assertEqual(cameras[0]["id"], second["id"])
-        self.assertEqual(self.client.get(f"/api/cameras/{first['id']}").status_code, 404)
-        self.assertIn(first["id"], self.connection_tester.removed)
+        self.assertEqual(
+            [camera["id"] for camera in cameras],
+            [first["id"], second["id"]],
+        )
+        self.assertEqual(
+            self.client.get(f"/api/cameras/{first['id']}").status_code,
+            200,
+        )
+        self.assertNotIn(first["id"], self.connection_tester.removed)
 
         saved = json.loads(self.config_path.read_text(encoding="utf-8"))
-        self.assertEqual(saved["camera"]["id"], second["id"])
+        self.assertEqual(
+            [camera["id"] for camera in saved["cameras"]],
+            [first["id"], second["id"]],
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_list_and_create_accept_trailing_slash(self) -> None:
+        """API chấp nhận URL có dấu gạch chéo cuối từ Next.js dev proxy."""
+        created = self.client.post(
+            "/api/cameras/",
+            json={"name": "Camera", "source": "rtsp://camera/stream"},
+        )
+
+        self.assertEqual(created.status_code, 201)
+        listed = self.client.get("/api/cameras/")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()[0]["id"], created.json()["id"])
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -192,7 +214,7 @@ class CameraApiTestCase(unittest.TestCase):
 
         saved = json.loads(self.config_path.read_text(encoding="utf-8"))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(saved["camera"]["name"], "Camera đã đổi tên")
+        self.assertEqual(saved["cameras"][0]["name"], "Camera đã đổi tên")
         self.assertEqual(saved["baselines"][0]["id"], "baseline-01")
 
     # ─────────────────────────────────────────────────────────────────────────

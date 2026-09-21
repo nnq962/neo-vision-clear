@@ -61,6 +61,12 @@ class CalibrationCreate(CalibrationFields):
     """Payload tạo một cấu hình baseline mới."""
 
 
+class CalibrationCreateRequest(CalibrationFields):
+    """Payload API tạo baseline và chỉ định camera sở hữu."""
+
+    camera_id: str = Field(min_length=1, max_length=100)
+
+
 class CalibrationUpdate(CalibrationFields):
     """Payload thay thế toàn bộ cấu hình của một baseline."""
 

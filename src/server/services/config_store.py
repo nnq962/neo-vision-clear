@@ -27,7 +27,7 @@ class ConfigError(RuntimeError):
 
 
 class CameraNotFoundError(LookupError):
-    """Báo lỗi khi không tìm thấy camera singleton theo ID."""
+    """Báo lỗi khi không tìm thấy camera theo ID."""
 
 
 class CameraValidationError(ValueError):
@@ -52,32 +52,19 @@ class ConfigStore:
     def __init__(
         self,
         path: str | Path,
-        legacy_calibration_path: str | Path | None = None,
     ):
-        """Khởi tạo store và đường dẫn calibration cũ dùng khi migration."""
+        """Khởi tạo store với đường dẫn tài liệu cấu hình chung."""
         self.path = Path(path)
-        self.legacy_calibration_path = (
-            Path(legacy_calibration_path)
-            if legacy_calibration_path is not None
-            else self.path.with_name("calibration.json")
-        )
         self._lock = RLock()
 
     # ─────────────────────────────────────────────────────────────────────────
 
     def list_cameras(self) -> list[CameraConfig]:
-        """Trả danh sách rỗng hoặc camera singleton hiện tại."""
-        camera = self.get_current_camera()
-        return [camera] if camera is not None else []
-
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def get_current_camera(self) -> CameraConfig | None:
-        """Trả camera singleton hiện tại hoặc None khi chưa cấu hình."""
-        # Bước 1: sao chép model để caller không sửa state vừa đọc từ document.
+        """Trả bản sao toàn bộ camera theo thứ tự được thêm vào."""
         with self._lock:
-            camera = self._read_unlocked().camera
-            return camera.model_copy(deep=True) if camera is not None else None
+            # Bước 1: sao chép sâu để caller không sửa document trong bộ nhớ.
+            cameras = self._read_unlocked().cameras
+            return [camera.model_copy(deep=True) for camera in cameras]
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -94,7 +81,7 @@ class ConfigStore:
         payload: CameraCreate,
         camera_id: str | None = None,
     ) -> CameraConfig:
-        """Lưu camera mới và ghi đè camera singleton hiện tại."""
+        """Thêm camera mới vào cuối danh sách mà không ghi đè camera cũ."""
         with self._lock:
             # Bước 1: tạo bản ghi camera mới với ID dùng chung cho MediaMTX.
             document = self._read_unlocked()
@@ -106,10 +93,8 @@ class ConfigStore:
                 **payload.model_dump(),
             )
 
-            # Bước 2: camera mới làm lựa chọn baseline runtime cũ mất hiệu lực.
-            document.camera = camera
-            document.runtime.enabled = False
-            document.runtime.active_baseline_id = None
+            # Bước 2: nối camera mới, giữ nguyên runtime của camera đang chạy.
+            document.cameras.append(camera)
             self._write_unlocked(document)
             return camera.model_copy(deep=True)
 
@@ -130,8 +115,9 @@ class ConfigStore:
             except ValidationError as exc:
                 raise CameraValidationError(str(exc)) from exc
 
-            # Bước 2: ghi lại document chung mà không làm mất baseline.
-            document.camera = updated
+            # Bước 2: thay đúng camera mà không làm mất camera hoặc baseline khác.
+            index = document.cameras.index(camera)
+            document.cameras[index] = updated
             self._write_unlocked(document)
             return updated.model_copy(deep=True)
 
@@ -142,9 +128,21 @@ class ConfigStore:
         with self._lock:
             document = self._read_unlocked()
             self._find_camera(document, camera_id)
-            document.camera = None
-            document.runtime.enabled = False
-            document.runtime.active_baseline_id = None
+            document.cameras.remove(self._find_camera(document, camera_id))
+
+            # Bước 1: chỉ vô hiệu runtime nếu baseline active thuộc camera bị xóa.
+            active_ids = {
+                baseline.id
+                for baseline in document.baselines
+                if baseline.camera_id == camera_id
+            }
+            if active_ids.intersection(document.runtime.active_baseline_ids):
+                document.runtime.enabled = False
+                document.runtime.active_baseline_ids = [
+                    baseline_id
+                    for baseline_id in document.runtime.active_baseline_ids
+                    if baseline_id not in active_ids
+                ]
             self._write_unlocked(document)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -234,8 +232,8 @@ class ConfigStore:
             document = self._read_unlocked()
             baseline = self._find_baseline(document, baseline_id)
             document.baselines.remove(baseline)
-            if document.runtime.active_baseline_id == baseline_id:
-                document.runtime.active_baseline_id = None
+            if baseline_id in document.runtime.active_baseline_ids:
+                document.runtime.active_baseline_ids.remove(baseline_id)
                 document.runtime.enabled = False
             self._write_unlocked(document)
 
@@ -292,10 +290,10 @@ class ConfigStore:
         document: AppConfigDocument,
         camera_id: str,
     ) -> CameraConfig:
-        """Tìm camera singleton trong document đang giữ khóa."""
-        camera = document.camera
-        if camera is not None and camera.id == camera_id:
-            return camera
+        """Tìm camera theo ID trong document đang giữ khóa."""
+        for camera in document.cameras:
+            if camera.id == camera_id:
+                return camera
         raise CameraNotFoundError(f"Không tìm thấy camera '{camera_id}'.")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -336,46 +334,19 @@ class ConfigStore:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _read_unlocked(self) -> AppConfigDocument:
-        """Đọc config chung và nhập calibration cũ khi chưa hợp nhất."""
-        # Bước 1: đọc config chính hoặc tạo document rỗng.
-        config_exists = self.path.exists()
-        if not config_exists:
-            document = AppConfigDocument()
-            is_unified = False
-        else:
-            payload = self._read_json(self.path)
-            is_unified = isinstance(payload, dict) and "baselines" in payload
-            try:
-                document = AppConfigDocument.model_validate(payload)
-            except ValidationError as exc:
-                raise ConfigError(
-                    f"Cấu hình không hợp lệ tại '{self.path}': {exc}"
-                ) from exc
+        """Đọc và validate tài liệu cấu hình chung theo schema hiện tại."""
+        # Bước 1: khi chưa có file, trả document mặc định mà không ghi đĩa.
+        if not self.path.exists():
+            return AppConfigDocument()
 
-        # Bước 2: chỉ nhập calibration.json khi config chưa từng dùng schema chung.
-        imported_legacy = False
-        if not is_unified and self.legacy_calibration_path.exists():
-            legacy_payload = self._read_json(self.legacy_calibration_path)
-            try:
-                legacy_document = AppConfigDocument.model_validate(legacy_payload)
-            except ValidationError as exc:
-                raise ConfigError(
-                    "Cấu hình calibration cũ không hợp lệ tại "
-                    f"'{self.legacy_calibration_path}': {exc}"
-                ) from exc
-            known_ids = {item.id for item in document.baselines}
-            imported_baselines = [
-                item
-                for item in legacy_document.baselines
-                if item.id not in known_ids
-            ]
-            document.baselines.extend(imported_baselines)
-            imported_legacy = bool(imported_baselines)
-
-        # Bước 3: ghi schema chung một lần sau khi đọc dữ liệu legacy thành công.
-        if (config_exists and not is_unified) or imported_legacy:
-            self._write_unlocked(document)
-        return document
+        # Bước 2: từ chối cấu hình sai schema thay vì âm thầm chuyển đổi.
+        payload = self._read_json(self.path)
+        try:
+            return AppConfigDocument.model_validate(payload)
+        except ValidationError as exc:
+            raise ConfigError(
+                f"Cấu hình không hợp lệ tại '{self.path}': {exc}"
+            ) from exc
 
     # ─────────────────────────────────────────────────────────────────────────
 

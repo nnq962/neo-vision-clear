@@ -16,6 +16,12 @@ type CameraHost = {
   cameraName: string
 }
 
+type CameraPlayer = {
+  element?: HTMLDivElement
+  cameraId: string
+  cameraName: string
+}
+
 type PersistentLiveCameraContextValue = {
   registerHost: (host: CameraHost) => () => void
 }
@@ -39,40 +45,19 @@ function resolveWebRtcBaseUrl() {
 export const PersistentLiveCameraContext =
   createContext<PersistentLiveCameraContextValue | null>(null)
 
-export function PersistentLiveCameraProvider({
-  children,
+function PersistentCameraFrame({
+  player,
+  webRtcBaseUrl,
 }: {
-  children: ReactNode
+  player: CameraPlayer
+  webRtcBaseUrl: string
 }) {
-  const [host, setHost] = useState<CameraHost>()
-  const [connectedCamera, setConnectedCamera] = useState<
-    Pick<CameraHost, "cameraId" | "cameraName">
-  >()
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const webRtcBaseUrl = resolveWebRtcBaseUrl()
-
-  const registerHost = useCallback((nextHost: CameraHost) => {
-    setHost(nextHost)
-    setConnectedCamera((current) =>
-      current?.cameraId === nextHost.cameraId &&
-      current.cameraName === nextHost.cameraName
-        ? current
-        : {
-            cameraId: nextHost.cameraId,
-            cameraName: nextHost.cameraName,
-          }
-    )
-
-    return () => {
-      setHost((currentHost) =>
-        currentHost?.element === nextHost.element ? undefined : currentHost
-      )
-    }
-  }, [])
 
   useLayoutEffect(() => {
     const iframe = iframeRef.current
-    if (!host || !iframe) {
+    const host = player.element
+    if (!iframe || !host) {
       if (iframe) iframe.style.visibility = "hidden"
       return
     }
@@ -81,7 +66,7 @@ export function PersistentLiveCameraProvider({
     const updateBounds = () => {
       window.cancelAnimationFrame(animationFrame)
       animationFrame = window.requestAnimationFrame(() => {
-        const rectangle = host.element.getBoundingClientRect()
+        const rectangle = host.getBoundingClientRect()
         iframe.style.height = `${rectangle.height}px`
         iframe.style.transform = `translate3d(${rectangle.left + window.scrollX}px, ${rectangle.top + window.scrollY}px, 0)`
         iframe.style.visibility =
@@ -92,7 +77,7 @@ export function PersistentLiveCameraProvider({
 
     updateBounds()
     const observer = new ResizeObserver(updateBounds)
-    observer.observe(host.element)
+    observer.observe(host)
     window.addEventListener("resize", updateBounds)
 
     return () => {
@@ -100,7 +85,46 @@ export function PersistentLiveCameraProvider({
       observer.disconnect()
       window.removeEventListener("resize", updateBounds)
     }
-  }, [host])
+  }, [player.element])
+
+  return (
+    <iframe
+      ref={iframeRef}
+      className="pointer-events-none invisible absolute top-0 left-0 z-10 rounded-xl border bg-black"
+      src={`${webRtcBaseUrl}/${encodeURIComponent(player.cameraId)}/?${PLAYER_PARAMETERS}`}
+      title={`Video trực tiếp từ ${player.cameraName}`}
+      allow="autoplay"
+      tabIndex={-1}
+    />
+  )
+}
+
+export function PersistentLiveCameraProvider({
+  children,
+}: {
+  children: ReactNode
+}) {
+  const [players, setPlayers] = useState<Map<string, CameraPlayer>>(new Map())
+  const webRtcBaseUrl = resolveWebRtcBaseUrl()
+
+  const registerHost = useCallback((nextHost: CameraHost) => {
+    setPlayers((current) => {
+      const next = new Map(current)
+      next.set(nextHost.cameraId, nextHost)
+      return next
+    })
+
+    return () => {
+      setPlayers((current) => {
+        const player = current.get(nextHost.cameraId)
+        if (player?.element !== nextHost.element) return current
+
+        const next = new Map(current)
+        next.set(nextHost.cameraId, { ...player, element: undefined })
+        return next
+      })
+    }
+  }, [])
 
   const contextValue = useMemo(
     () => ({ registerHost }),
@@ -110,16 +134,13 @@ export function PersistentLiveCameraProvider({
   return (
     <PersistentLiveCameraContext.Provider value={contextValue}>
       {children}
-      {connectedCamera ? (
-        <iframe
-          ref={iframeRef}
-          className="pointer-events-none absolute left-0 top-0 z-10 rounded-xl border bg-black invisible"
-          src={`${webRtcBaseUrl}/${encodeURIComponent(connectedCamera.cameraId)}/?${PLAYER_PARAMETERS}`}
-          title={`Video trực tiếp từ ${connectedCamera.cameraName}`}
-          allow="autoplay"
-          tabIndex={-1}
+      {Array.from(players.values()).map((player) => (
+        <PersistentCameraFrame
+          key={player.cameraId}
+          player={player}
+          webRtcBaseUrl={webRtcBaseUrl}
         />
-      ) : null}
+      ))}
     </PersistentLiveCameraContext.Provider>
   )
 }

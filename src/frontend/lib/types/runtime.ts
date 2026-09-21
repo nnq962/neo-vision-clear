@@ -12,7 +12,7 @@ export type RuntimeDetectionConfig = {
 
 export type RuntimeConfig = {
   enabled: boolean
-  activeBaselineId?: string
+  activeBaselineIds: string[]
   snapshotMaxAgeSeconds: number
   logIntervalSeconds: number
   detection: RuntimeDetectionConfig
@@ -20,7 +20,7 @@ export type RuntimeConfig = {
 
 export type RuntimeProcessStatus = {
   status: "stopped" | "starting" | "running" | "stopping" | "failed"
-  activeBaselineId?: string
+  activeBaselineIds: string[]
   snapshotAgeMs?: number
   error?: string
   startedAt?: string

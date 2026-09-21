@@ -18,12 +18,23 @@ from walkway_monitor.models import RoiDefinition
 class FakeEstimator:
     """Depth estimator xác định dùng để test mà không cần checkpoint."""
 
+    def __init__(self) -> None:
+        """Khởi tạo lịch sử kích thước batch đã nhận."""
+        self.batch_sizes: list[int] = []
+
     def predict(self, frame: np.ndarray) -> np.ndarray:
         """Trả về gradient depth cố định cùng kích thước frame."""
         height, width = frame.shape[:2]
         return np.linspace(0.1, 2.0, height * width, dtype=np.float32).reshape(
             height, width
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def predict_batch(self, frames: list[np.ndarray]) -> list[np.ndarray]:
+        """Ghi nhận batch và trả depth map theo đúng thứ tự frame."""
+        self.batch_sizes.append(len(frames))
+        return [self.predict(frame) for frame in frames]
 
 
 class FakeMediaSources:
@@ -68,9 +79,11 @@ class CalibrationPipelineTestCase(unittest.TestCase):
                 dtype=np.float32,
             )
         )
+        estimator = FakeEstimator()
         pipeline = CalibrationPipeline(
-            estimator=FakeEstimator(),
+            estimator=estimator,
             config=CalibrationConfig(frame_count=5, process_width=0),
+            batch_size=2,
         )
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "baseline.npz"
@@ -99,6 +112,7 @@ class CalibrationPipelineTestCase(unittest.TestCase):
             self.assertTrue(output.with_suffix(".depth.jpg").is_file())
             self.assertEqual(artifact.frame_count, 5)
             self.assertEqual(artifact.source_type, "VIDEO")
+            self.assertEqual(estimator.batch_sizes, [2, 2, 1])
 
     # ─────────────────────────────────────────────────────────────────────────
 

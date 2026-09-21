@@ -185,15 +185,51 @@ class DepthAnythingV2(nn.Module):
     
     @torch.no_grad()
     def infer_image(self, raw_image, input_size=518):
-        image, (h, w) = self.image2tensor(raw_image, input_size)
-        
-        depth = self.forward(image)
-        
-        depth = F.interpolate(depth[:, None], (h, w), mode="bilinear", align_corners=True)[0, 0]
-        
-        return depth.cpu().numpy()
+        """Suy luận một ảnh BGR và trả depth map cùng kích thước ảnh gốc."""
+        return self.infer_image_batch([raw_image], input_size)[0]
+
+    @torch.no_grad()
+    def infer_image_batch(self, raw_images, input_size=518):
+        """Suy luận nhiều ảnh trong một forward và resize riêng từng kết quả."""
+        raw_images = list(raw_images)
+        if not raw_images:
+            raise ValueError("Batch ảnh đầu vào không được rỗng.")
+
+        # Bước 1: tiền xử lý độc lập để giữ lại kích thước gốc của từng ảnh.
+        prepared = [self._prepare_image(image, input_size) for image in raw_images]
+        tensors = [item[0] for item in prepared]
+        original_sizes = [item[1] for item in prepared]
+        first_shape = tensors[0].shape
+        if any(tensor.shape != first_shape for tensor in tensors[1:]):
+            raise ValueError(
+                "Các ảnh trong cùng batch phải tạo tensor có cùng kích thước."
+            )
+
+        # Bước 2: stack theo chiều batch và chỉ forward model đúng một lần.
+        device = next(self.parameters()).device
+        images = torch.stack(tensors, dim=0).to(device)
+        depths = self.forward(images)
+
+        # Bước 3: mỗi ảnh có thể có kích thước gốc khác nhau nên resize riêng.
+        outputs = []
+        for index, (height, width) in enumerate(original_sizes):
+            depth = F.interpolate(
+                depths[index][None, None],
+                (height, width),
+                mode="bilinear",
+                align_corners=True,
+            )[0, 0]
+            outputs.append(depth.cpu().numpy())
+        return outputs
     
-    def image2tensor(self, raw_image, input_size=518):        
+    def image2tensor(self, raw_image, input_size=518):
+        """Chuyển một ảnh BGR thành tensor batch size 1 trên thiết bị model."""
+        image, original_size = self._prepare_image(raw_image, input_size)
+        device = next(self.parameters()).device
+        return image.unsqueeze(0).to(device), original_size
+
+    def _prepare_image(self, raw_image, input_size=518):
+        """Tiền xử lý một ảnh BGR thành tensor CHW trên CPU."""
         transform = Compose([
             Resize(
                 width=input_size,
@@ -213,9 +249,6 @@ class DepthAnythingV2(nn.Module):
         image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB) / 255.0
         
         image = transform({'image': image})['image']
-        image = torch.from_numpy(image).unsqueeze(0)
-        
-        DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
-        image = image.to(DEVICE)
-        
+        # Giữ tensor trên CPU để caller có thể stack cả batch trước khi transfer.
+        image = torch.from_numpy(image)
         return image, (h, w)

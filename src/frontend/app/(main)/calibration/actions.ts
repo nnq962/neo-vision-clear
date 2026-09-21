@@ -23,6 +23,11 @@ export type SaveAndStartBaselineResult = {
   run?: CalibrationRunStatus
 }
 
+export type DeleteBaselineResult = {
+  status: "success" | "error"
+  message: string
+}
+
 function readErrorMessage(payload: unknown): string {
   if (typeof payload !== "object" || payload === null || !("detail" in payload)) {
     return "Không thể lưu cấu hình baseline."
@@ -162,6 +167,7 @@ export async function saveBaseline(
   formData: FormData
 ): Promise<SaveBaselineState> {
   const baselineId = String(formData.get("baseline_id") ?? "").trim()
+  const cameraId = String(formData.get("camera_id") ?? "").trim()
   const name = String(formData.get("name") ?? "").trim()
   const roiPoints = readPoints(formData, "roi_points")
   const worldPoints: CalibrationPoint[] = Array.from({ length: 4 }, (_, index) => [
@@ -172,6 +178,9 @@ export async function saveBaseline(
   if (!name) {
     return { status: "error", message: "Vui lòng nhập tên baseline." }
   }
+  if (!baselineId && !cameraId) {
+    return { status: "error", message: "Vui lòng chọn camera cần calibration." }
+  }
   if (!roiPoints) {
     return { status: "error", message: "Vui lòng chọn đủ 4 điểm ROI." }
   }
@@ -180,6 +189,7 @@ export async function saveBaseline(
   }
 
   const body = {
+    ...(!baselineId && { camera_id: cameraId }),
     name,
     roi_points: roiPoints,
     world_points: worldPoints,
@@ -247,6 +257,24 @@ export async function startCalibration(
       return { status: "error", message: "Backend trả trạng thái không hợp lệ." }
     }
     return { status: "success", message: "Đã bắt đầu calibration.", run }
+  } catch {
+    return { status: "error", message: "Không kết nối được backend calibration." }
+  }
+}
+
+export async function deleteBaseline(
+  baselineId: string
+): Promise<DeleteBaselineResult> {
+  try {
+    const response = await fetch(
+      `/api/calibration/${encodeURIComponent(baselineId)}`,
+      { method: "DELETE", cache: "no-store" }
+    )
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => undefined)
+      return { status: "error", message: readErrorMessage(payload) }
+    }
+    return { status: "success", message: "Đã xoá baseline và artifact liên quan." }
   } catch {
     return { status: "error", message: "Không kết nối được backend calibration." }
   }

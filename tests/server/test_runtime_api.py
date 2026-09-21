@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from server.app import create_app
 from server.models.config import RuntimeProcessResponse
-from server.services.config_store import ConfigStore
+from server.services.config_store import ConfigError, ConfigStore
 from server.services.snapshot_store import SnapshotRead, SnapshotStore
 from server.settings import ServerSettings
 
@@ -46,14 +47,14 @@ class FakeMonitorService:
 
     def status(self) -> RuntimeProcessResponse:
         """Trả trạng thái tiến trình giả phục vụ route status."""
-        active_baseline_id = (
-            self.started_with[1].id
+        active_baseline_ids = (
+            [baseline.id for baseline in self.started_with[1]]
             if self.started_with is not None and self.process_status != "stopped"
-            else None
+            else []
         )
         return RuntimeProcessResponse(
             status=self.process_status,
-            active_baseline_id=active_baseline_id,
+            active_baseline_ids=active_baseline_ids,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -80,6 +81,12 @@ class FakeCalibrationService:
 
     def stop(self) -> None:
         """Không có calibration worker thật cần dừng."""
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def delete_artifacts(self, _baseline_id: str) -> tuple[Path, ...]:
+        """Không có artifact thật cần xóa trong test runtime."""
+        return ()
 
 
 class RuntimeApiTestCase(unittest.TestCase):
@@ -112,15 +119,21 @@ class RuntimeApiTestCase(unittest.TestCase):
 
     def _create_baseline(self) -> dict[str, object]:
         """Tạo camera và baseline hợp lệ để dùng trong test runtime."""
-        self.client.post(
+        camera = self.client.post(
             "/api/cameras",
             json={"name": "Camera", "source": "rtsp://camera.local/stream"},
-        )
+        ).json()
         response = self.client.post(
             "/api/calibration",
             json={
+                "camera_id": camera["id"],
                 "name": "Baseline runtime",
-                "roi_points": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                "roi_points": [
+                    [0.1, 0.1],
+                    [0.9, 0.1],
+                    [0.9, 0.9],
+                    [0.1, 0.9],
+                ],
                 "world_points": [[0, 0], [2, 0], [2, 6], [0, 6]],
                 "unit": "m",
                 "encoder": "vits",
@@ -139,7 +152,8 @@ class RuntimeApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["enabled"])
-        self.assertIsNone(response.json()["active_baseline_id"])
+        self.assertEqual(response.json()["active_baseline_ids"], [])
+        self.assertNotIn("inference_batch_size", response.json())
         self.assertEqual(response.json()["detection"]["noise_multiplier"], 6.0)
         self.assertFalse(self.config_path.exists())
 
@@ -150,7 +164,7 @@ class RuntimeApiTestCase(unittest.TestCase):
         baseline = self._create_baseline()
         payload = {
             "enabled": True,
-            "active_baseline_id": baseline["id"],
+            "active_baseline_ids": [baseline["id"]],
             "snapshot_max_age_seconds": 3.0,
             "log_interval_seconds": 1.0,
             "detection": {
@@ -171,6 +185,7 @@ class RuntimeApiTestCase(unittest.TestCase):
 
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(loaded.json(), payload)
+        self.assertEqual(updated.json(), loaded.json())
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -178,7 +193,7 @@ class RuntimeApiTestCase(unittest.TestCase):
         """Runtime bật nhưng chưa chọn baseline phải bị từ chối."""
         response = self.client.put(
             "/api/runtime",
-            json={"enabled": True, "active_baseline_id": None},
+            json={"enabled": True, "active_baseline_ids": []},
         )
 
         self.assertEqual(response.status_code, 422)
@@ -189,10 +204,102 @@ class RuntimeApiTestCase(unittest.TestCase):
         """Runtime không được tham chiếu baseline không tồn tại."""
         response = self.client.put(
             "/api/runtime",
-            json={"enabled": False, "active_baseline_id": "unknown"},
+            json={"enabled": False, "active_baseline_ids": ["unknown"]},
         )
 
         self.assertEqual(response.status_code, 422)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_rejects_removed_batch_size_field(self) -> None:
+        """API không còn nhận trường batch size do client tự cung cấp."""
+        response = self.client.put(
+            "/api/runtime",
+            json={"inference_batch_size": 32},
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_rejects_legacy_runtime_document_without_migration(self) -> None:
+        """Store báo lỗi rõ ràng khi JSON còn schema runtime cũ."""
+        # Bước 1: mô phỏng tài liệu cũ mà không gọi endpoint để tránh lỗi 500.
+        self.config_path.write_text(
+            json.dumps({"version": 2, "runtime": {"inference_batch_size": 2}}),
+            encoding="utf-8",
+        )
+
+        # Bước 2: schema mới từ chối trường cũ và giữ nguyên file gốc.
+        with self.assertRaises(ConfigError):
+            self.application.state.config_store.get_runtime()
+        self.assertIn("inference_batch_size", self.config_path.read_text(encoding="utf-8"))
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_deleting_selected_camera_removes_active_baseline(self) -> None:
+        """Xóa camera active phải loại baseline khỏi runtime đã lưu."""
+        baseline = self._create_baseline()
+        self.client.put(
+            "/api/runtime",
+            json={"active_baseline_ids": [baseline["id"]]},
+        )
+
+        deleted = self.client.delete(f"/api/cameras/{baseline['camera_id']}")
+        persisted = json.loads(self.config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(persisted["runtime"]["active_baseline_ids"], [])
+        self.assertNotIn("inference_batch_size", persisted["runtime"])
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_deleting_selected_baseline_updates_active_ids(self) -> None:
+        """Xóa baseline active phải loại ID khỏi runtime đã lưu."""
+        baseline = self._create_baseline()
+        self.client.put(
+            "/api/runtime",
+            json={"active_baseline_ids": [baseline["id"]]},
+        )
+
+        deleted = self.client.delete(f"/api/calibration/{baseline['id']}")
+        persisted = json.loads(self.config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(persisted["runtime"]["active_baseline_ids"], [])
+        self.assertNotIn("inference_batch_size", persisted["runtime"])
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_start_resolves_camera_from_selected_baseline(self) -> None:
+        """Runtime mở camera sở hữu baseline thay vì luôn lấy camera đầu tiên."""
+        self.client.post(
+            "/api/cameras",
+            json={"name": "Camera 1", "source": "rtsp://camera-1/stream"},
+        )
+        second_camera = self.client.post(
+            "/api/cameras",
+            json={"name": "Camera 2", "source": "rtsp://camera-2/stream"},
+        ).json()
+        baseline = self.client.post(
+            "/api/calibration",
+            json={
+                "camera_id": second_camera["id"],
+                "name": "Baseline camera 2",
+                "roi_points": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                "world_points": [[0, 0], [2, 0], [2, 6], [0, 6]],
+            },
+        ).json()
+        self.client.put(
+            "/api/runtime",
+            json={"active_baseline_ids": [baseline["id"]]},
+        )
+
+        response = self.client.post("/api/runtime/start")
+
+        self.assertEqual(response.status_code, 202)
+        service = self.application.state.monitor_service
+        self.assertEqual(service.started_with[0][0].id, second_camera["id"])
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -203,7 +310,7 @@ class RuntimeApiTestCase(unittest.TestCase):
             "/api/runtime",
             json={
                 "enabled": False,
-                "active_baseline_id": baseline["id"],
+                "active_baseline_ids": [baseline["id"]],
             },
         )
         self.assertEqual(configured.status_code, 200)
@@ -213,7 +320,10 @@ class RuntimeApiTestCase(unittest.TestCase):
 
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.json()["status"], "starting")
-        self.assertEqual(status_response.json()["active_baseline_id"], baseline["id"])
+        self.assertEqual(
+            status_response.json()["active_baseline_ids"],
+            [baseline["id"]],
+        )
         self.assertTrue(self.client.get("/api/runtime").json()["enabled"])
 
         stopped = self.client.post("/api/runtime/stop")
@@ -231,7 +341,47 @@ class RuntimeApiTestCase(unittest.TestCase):
         response = self.client.post("/api/runtime/start")
 
         self.assertEqual(response.status_code, 409)
-        self.assertIn("active_baseline_id", response.json()["detail"])
+        self.assertIn("active_baseline_ids", response.json()["detail"])
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_start_resolves_multiple_cameras_in_batch_order(self) -> None:
+        """API truyền nhiều camera và baseline vào worker theo thứ tự đã chọn."""
+        first_baseline = self._create_baseline()
+        second_camera = self.client.post(
+            "/api/cameras",
+            json={"name": "Camera 2", "source": "rtsp://camera-2/stream"},
+        ).json()
+        second_baseline = self.client.post(
+            "/api/calibration",
+            json={
+                "camera_id": second_camera["id"],
+                "name": "Baseline camera 2",
+                "roi_points": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                "world_points": [[0, 0], [2, 0], [2, 6], [0, 6]],
+            },
+        ).json()
+        baseline_ids = [first_baseline["id"], second_baseline["id"]]
+        self.client.put(
+            "/api/runtime",
+            json={
+                "active_baseline_ids": baseline_ids,
+            },
+        )
+
+        response = self.client.post("/api/runtime/start")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.client.get("/api/runtime").json()["active_baseline_ids"], baseline_ids)
+        service = self.application.state.monitor_service
+        self.assertEqual(
+            [camera.id for camera in service.started_with[0]],
+            [first_baseline["camera_id"], second_camera["id"]],
+        )
+        self.assertEqual(
+            [baseline.id for baseline in service.started_with[1]],
+            baseline_ids,
+        )
 
 
 if __name__ == "__main__":

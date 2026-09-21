@@ -47,12 +47,12 @@ class RuntimeDetectionConfig(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
-    """Cấu hình đầy đủ để chọn baseline và chạy worker detection."""
+    """Cấu hình đầy đủ để chọn các baseline và chạy worker detection."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     enabled: bool = False
-    active_baseline_id: str | None = None
+    active_baseline_ids: list[str] = Field(default_factory=list, max_length=32)
     snapshot_max_age_seconds: float = Field(default=2.0, gt=0)
     log_interval_seconds: float = Field(default=2.0, ge=0)
     detection: RuntimeDetectionConfig = Field(default_factory=RuntimeDetectionConfig)
@@ -61,10 +61,15 @@ class RuntimeConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_active_baseline(self) -> "RuntimeConfig":
-        """Yêu cầu chọn baseline trước khi bật runtime."""
-        # Runtime tắt được phép chưa chọn baseline để hỗ trợ cấu hình ban đầu.
-        if self.enabled and self.active_baseline_id is None:
-            raise ValueError("Runtime đang bật phải có active_baseline_id.")
+        """Yêu cầu danh sách baseline không trùng và hợp lệ khi bật runtime."""
+        # Bước 1: không cho cùng một baseline xuất hiện hai lần trong batch.
+        if len(set(self.active_baseline_ids)) != len(self.active_baseline_ids):
+            raise ValueError("active_baseline_ids không được chứa giá trị trùng.")
+
+        # Bước 2: runtime tắt được phép chưa chọn baseline để cấu hình ban đầu.
+        if self.enabled and not self.active_baseline_ids:
+            raise ValueError("Runtime đang bật phải có active_baseline_ids.")
+
         return self
 
 
@@ -74,7 +79,7 @@ class RuntimeProcessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["stopped", "starting", "running", "stopping", "failed"]
-    active_baseline_id: str | None = None
+    active_baseline_ids: list[str] = Field(default_factory=list)
     snapshot_age_ms: int | None = None
     error: str | None = None
     started_at: datetime | None = None
@@ -86,7 +91,7 @@ class AppConfigDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[2] = 2
-    camera: CameraConfig | None = None
+    cameras: list[CameraConfig] = Field(default_factory=list)
     baselines: list[CalibrationConfig] = Field(default_factory=list)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     uart: UartConfig = Field(default_factory=UartConfig)
@@ -95,59 +100,38 @@ class AppConfigDocument(BaseModel):
 
     @model_validator(mode="after")
     def validate_runtime_relationships(self) -> "AppConfigDocument":
-        """Kiểm tra baseline runtime tồn tại và thuộc camera hiện tại."""
+        """Kiểm tra các baseline runtime tồn tại và thuộc camera khác nhau."""
         # Bước 1: runtime chưa chọn baseline không tạo thêm ràng buộc quan hệ.
-        baseline_id = self.runtime.active_baseline_id
-        if baseline_id is None:
+        baseline_ids = self.runtime.active_baseline_ids
+        if not baseline_ids:
             return self
 
-        # Bước 2: ID active phải tham chiếu đúng một baseline đã lưu.
-        baseline = next(
-            (item for item in self.baselines if item.id == baseline_id),
-            None,
-        )
-        if baseline is None:
-            raise ValueError(
-                f"Không tìm thấy active baseline '{baseline_id}'."
+        # Bước 2: resolve đủ baseline và camera theo đúng thứ tự batch đã chọn.
+        selected_baselines = []
+        for baseline_id in baseline_ids:
+            baseline = next(
+                (item for item in self.baselines if item.id == baseline_id),
+                None,
             )
+            if baseline is None:
+                raise ValueError(f"Không tìm thấy active baseline '{baseline_id}'.")
+            if not any(camera.id == baseline.camera_id for camera in self.cameras):
+                raise ValueError("Active baseline không thuộc camera hiện có.")
+            selected_baselines.append(baseline)
 
-        # Bước 3: baseline active phải thuộc camera singleton hiện tại.
-        if self.camera is None or baseline.camera_id != self.camera.id:
-            raise ValueError("Active baseline không thuộc camera hiện tại.")
-        return self
+        # Bước 3: mỗi camera chỉ góp một frame vào một lượt inference.
+        camera_ids = [baseline.camera_id for baseline in selected_baselines]
+        if len(set(camera_ids)) != len(camera_ids):
+            raise ValueError("Mỗi camera chỉ được chọn một baseline cho runtime.")
 
-    # ─────────────────────────────────────────────────────────────────────────
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_document(cls, value: object) -> object:
-        """Chuẩn hóa các tài liệu camera hoặc calibration cũ về schema chung."""
-        if not isinstance(value, dict):
-            return value
-
-        # Bước 1: lấy camera singleton hoặc camera mới nhất từ schema danh sách cũ.
-        payload = dict(value)
-        camera = payload.get("camera")
-        cameras = payload.get("cameras")
-        if camera is None and isinstance(cameras, list) and cameras:
-            camera = cameras[-1]
-
-        # Bước 2: chuyển calibration singleton cũ thành một baseline có danh tính.
-        baselines = payload.get("baselines", [])
-        if not isinstance(baselines, list):
-            baselines = []
-        calibration = payload.get("calibration")
-        if isinstance(calibration, dict):
-            migrated = dict(calibration)
-            migrated.setdefault("id", "legacy-baseline")
-            migrated.setdefault("name", "Baseline đã lưu")
-            baselines = [*baselines, migrated]
-
-        # Bước 3: chỉ trả các trường thuộc schema mới để loại metadata legacy.
-        return {
-            "version": 2,
-            "camera": camera,
-            "baselines": baselines,
-            "runtime": payload.get("runtime", RuntimeConfig()),
-            "uart": payload.get("uart", UartConfig()),
+        # Bước 4: các baseline dùng chung model phải cùng encoder và input size.
+        model_specs = {
+            (baseline.encoder, baseline.input_size, baseline.process_width)
+            for baseline in selected_baselines
         }
+        if len(model_specs) > 1:
+            raise ValueError(
+                "Các baseline trong cùng batch phải dùng cùng encoder, "
+                "input_size và process_width."
+            )
+        return self

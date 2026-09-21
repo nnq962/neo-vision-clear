@@ -1,5 +1,7 @@
 """Kiểm thử resize full frame về đúng kích thước baseline."""
 
+from __future__ import annotations
+
 import unittest
 from unittest.mock import patch
 
@@ -39,9 +41,20 @@ class DetectionPipelineTestCase(unittest.TestCase):
         class FakeEstimator:
             """Estimator giả trả depth của baseline."""
 
+            def __init__(self) -> None:
+                """Khởi tạo lịch sử kích thước batch đã nhận."""
+                self.batch_sizes: list[int] = []
+
             def predict(self, _frame: np.ndarray) -> np.ndarray:
                 """Trả bản sao depth để analyzer có thể xử lý độc lập."""
                 return baseline.reference_depth.copy()
+
+            # ─────────────────────────────────────────────────────────────────
+
+            def predict_batch(self, frames: list[np.ndarray]) -> list[np.ndarray]:
+                """Ghi nhận batch và trả một depth map cho mỗi frame."""
+                self.batch_sizes.append(len(frames))
+                return [self.predict(frame) for frame in frames]
 
         class FakeMedia:
             """Nguồn giả phát đúng hai frame rồi kết thúc."""
@@ -76,12 +89,14 @@ class DetectionPipelineTestCase(unittest.TestCase):
                 self.count += 1
                 return [frame.copy()], [None]
 
+        estimator = FakeEstimator()
         pipeline = DetectionPipeline(
-            FakeEstimator(),
+            estimator,
             baseline,
             DetectionConfig(),
             display=False,
             log_interval=0,
+            batch_size=2,
         )
         with patch(
             "walkway_monitor.detection.pipeline.MediaSources",
@@ -90,6 +105,7 @@ class DetectionPipelineTestCase(unittest.TestCase):
             processed = pipeline.run("fake")
 
         self.assertEqual(processed, 2)
+        self.assertEqual(estimator.batch_sizes, [2])
 
 
 if __name__ == "__main__":

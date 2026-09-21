@@ -8,6 +8,7 @@ from pathlib import Path
 
 DEFAULT_BASELINES_DIRECTORY = "data/baselines"
 DEFAULT_BASELINE_PATH = f"{DEFAULT_BASELINES_DIRECTORY}/default/baseline.npz"
+DEFAULT_INFERENCE_BATCH_SIZE = 2
 SUPPORTED_ENCODERS = ("vits", "vitb", "vitl")
 
 

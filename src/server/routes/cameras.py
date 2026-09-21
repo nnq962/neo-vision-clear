@@ -28,11 +28,12 @@ router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@router.get("/", response_model=List[CameraResponse], include_in_schema=False)
 @router.get("", response_model=List[CameraResponse])
 def list_cameras(
     store: Annotated[ConfigStore, Depends(get_config_store)],
 ) -> list[CameraResponse]:
-    """Trả camera singleton hiện tại dưới dạng danh sách tương thích API."""
+    """Trả toàn bộ camera đã lưu theo thứ tự được thêm vào."""
     # Response giữ source để form có thể chỉnh sửa cấu hình camera hiện tại.
     return [camera.to_response() for camera in store.list_cameras()]
 
@@ -40,6 +41,12 @@ def list_cameras(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@router.post(
+    "/",
+    response_model=CameraResponse,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+)
 @router.post("", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
 def create_camera(
     payload: CameraCreate,
@@ -50,10 +57,7 @@ def create_camera(
     ],
 ) -> CameraResponse:
     """Đăng ký MediaMTX rồi lưu camera khi path đã sẵn sàng."""
-    # Ghi nhớ path cũ để dọn sau khi camera mới đã sẵn sàng và lưu thành công.
-    current_camera = store.get_current_camera()
-
-    # ID dùng chung cho JSON và path WebRTC của MediaMTX.
+    # Bước 1: ID dùng chung cho JSON và path WebRTC của MediaMTX.
     camera_id = uuid4().hex[:12]
     try:
         tester.register(camera_id, payload)
@@ -62,15 +66,9 @@ def create_camera(
     try:
         camera = store.create_camera(payload, camera_id=camera_id)
     except Exception:
-        # JSON không ghi được thì rollback path để hai hệ thống không lệch nhau.
+        # Bước 2: JSON không ghi được thì rollback path để hai hệ thống đồng bộ.
         tester.remove(camera_id)
         raise
-    if current_camera is not None and current_camera.id != camera_id:
-        try:
-            tester.remove(current_camera.id)
-        except CameraConnectionError:
-            # Camera mới đã lưu thành công; path cũ không được làm request thất bại.
-            pass
     return camera.to_response()
 
 

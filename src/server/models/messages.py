@@ -110,11 +110,22 @@ class OverviewInfoData(CorridorInfoData):
         return cls.model_validate(payload)
 
 
-class OverviewInfoResponse(SnapshotResponse):
-    """Phản hồi WebSocket riêng cho dashboard có cả số đo và zone."""
+class OverviewCameraInfo(BaseModel):
+    """Snapshot và trạng thái mới nhất của một baseline trong batch."""
+
+    baseline_id: str
+    status: Literal["ok", "warming_up", "stale", "error"]
+    age_ms: int | None = None
+    error: str | None = None
+    data: OverviewInfoData | None = None
+
+
+class OverviewInfoResponse(BaseModel):
+    """Phản hồi WebSocket dashboard chứa kết quả mọi camera runtime."""
 
     type: Literal["overview_info"] = "overview_info"
-    data: OverviewInfoData | None = None
+    request_id: str
+    items: list[OverviewCameraInfo]
 
 
 class ProtocolErrorResponse(BaseModel):

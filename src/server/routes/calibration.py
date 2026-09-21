@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from server.dependencies import get_calibration_service, get_config_store
 from server.models.calibration import (
     CalibrationCreate,
+    CalibrationCreateRequest,
     CalibrationResponse,
     CalibrationRunResponse,
     CalibrationUpdate,
@@ -25,6 +26,7 @@ from server.services.calibration import (
 from server.services.config_store import (
     BaselineNameConflictError,
     BaselineNotFoundError,
+    CameraNotFoundError,
     ConfigStore,
 )
 
@@ -38,10 +40,14 @@ router = APIRouter(prefix="/api/calibration", tags=["calibration"])
 @router.get("", response_model=List[CalibrationResponse])
 def list_baselines(
     store: Annotated[ConfigStore, Depends(get_config_store)],
+    camera_id: str | None = None,
 ) -> list[CalibrationResponse]:
-    """Trả toàn bộ baseline đã lưu mà không chạy pipeline."""
-    # Bước 1: chuyển bản ghi nội bộ sang response theo thứ tự mới nhất trước.
-    return [baseline.to_response() for baseline in store.list_baselines()]
+    """Trả baseline của một camera hoặc toàn bộ baseline đã lưu."""
+    # Bước 1: lọc theo camera khi frontend đang cấu hình một nguồn cụ thể.
+    baselines = store.list_baselines()
+    if camera_id is not None:
+        baselines = [item for item in baselines if item.camera_id == camera_id]
+    return [baseline.to_response() for baseline in baselines]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,21 +55,22 @@ def list_baselines(
 
 @router.post("", response_model=CalibrationResponse, status_code=status.HTTP_201_CREATED)
 def create_baseline(
-    payload: CalibrationCreate,
+    payload: CalibrationCreateRequest,
     store: Annotated[ConfigStore, Depends(get_config_store)],
 ) -> CalibrationResponse:
     """Validate và thêm baseline mới mà không khởi chạy calibration."""
-    # Bước 1: calibration luôn gắn với camera singleton đang được cấu hình.
-    camera = store.get_current_camera()
-    if camera is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Cần lưu camera trước khi lưu cấu hình calibration.",
-        )
-
-    # Bước 2: chỉ ghi JSON; pipeline và model không được gọi tại endpoint này.
+    # Bước 1: camera phải được chỉ định rõ, không tự chọn nguồn đầu tiên.
     try:
-        return store.create_baseline(camera.id, payload).to_response()
+        camera = store.get_camera(payload.camera_id)
+    except CameraNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # Bước 2: loại camera_id khỏi các trường cấu hình trước khi ghi document.
+    create_payload = CalibrationCreate.model_validate(
+        payload.model_dump(exclude={"camera_id"})
+    )
+    try:
+        return store.create_baseline(camera.id, create_payload).to_response()
     except BaselineNameConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -142,7 +149,7 @@ def get_baseline_image(
         # Bước 1: không cho truy cập artifact không còn bản ghi cấu hình.
         store.get_baseline(baseline_id)
 
-        # Bước 2: service xử lý cả layout thư mục mới và layout phẳng cũ.
+        # Bước 2: service tìm ảnh trong thư mục artifact của baseline.
         image_path = service.get_artifact_image_path(baseline_id, image_type)
     except BaselineNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

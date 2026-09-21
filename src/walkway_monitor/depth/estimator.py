@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, Sequence
 
 import numpy as np
 import torch
@@ -35,10 +35,14 @@ if set(MODEL_CONFIGS) != set(SUPPORTED_ENCODERS):
 
 
 class DepthEstimator(Protocol):
-    """Giao diện tối thiểu của một model tạo relative depth map."""
+    """Giao diện model tạo relative depth map đơn lẻ hoặc theo batch."""
 
     def predict(self, frame: np.ndarray) -> np.ndarray:
         """Suy luận một frame BGR và trả về depth map float32 cùng kích thước."""
+        ...
+
+    def predict_batch(self, frames: Sequence[np.ndarray]) -> list[np.ndarray]:
+        """Suy luận một batch frame BGR và trả depth map theo đúng thứ tự."""
         ...
 
 
@@ -83,12 +87,54 @@ class DepthAnythingEstimator:
 
     def predict(self, frame: np.ndarray) -> np.ndarray:
         """Chạy Depth Anything và chuẩn hóa kết quả thành float32 hai chiều."""
-        if not isinstance(frame, np.ndarray) or frame.ndim != 3:
-            raise ValueError("Frame đầu vào phải là numpy.ndarray BGR ba chiều.")
-        depth = self._model.infer_image(frame, self._input_size)
-        depth = np.asarray(depth, dtype=np.float32)
-        if depth.shape != frame.shape[:2]:
-            raise RuntimeError("Depth Anything trả về depth map sai kích thước.")
-        if not np.all(np.isfinite(depth)):
-            raise RuntimeError("Depth Anything trả về giá trị không hữu hạn.")
-        return depth
+        return self.predict_batch([frame])[0]
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def predict_batch(self, frames: Sequence[np.ndarray]) -> list[np.ndarray]:
+        """Chạy một forward cho nhiều frame và kiểm tra từng depth map đầu ra."""
+        normalized_frames = list(frames)
+        if not normalized_frames:
+            raise ValueError("Batch frame không được rỗng.")
+        for frame in normalized_frames:
+            if not isinstance(frame, np.ndarray) or frame.ndim != 3:
+                raise ValueError("Mỗi frame phải là numpy.ndarray BGR ba chiều.")
+
+        # Bước 1: gom preprocessing và forward vào implementation model để chỉ
+        # chuyển một tensor batch qua accelerator.
+        depths = self._model.infer_image_batch(
+            normalized_frames,
+            self._input_size,
+        )
+        if len(depths) != len(normalized_frames):
+            raise RuntimeError("Depth Anything trả về sai số lượng depth map.")
+
+        # Bước 2: chuẩn hóa dtype và xác nhận từng output khớp frame tương ứng.
+        normalized_depths: list[np.ndarray] = []
+        for frame, depth in zip(normalized_frames, depths):
+            normalized_depth = np.asarray(depth, dtype=np.float32)
+            if normalized_depth.shape != frame.shape[:2]:
+                raise RuntimeError("Depth Anything trả về depth map sai kích thước.")
+            if not np.all(np.isfinite(normalized_depth)):
+                raise RuntimeError("Depth Anything trả về giá trị không hữu hạn.")
+            normalized_depths.append(normalized_depth)
+        return normalized_depths
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def predict_depth_batch(
+    estimator: DepthEstimator,
+    frames: Sequence[np.ndarray],
+) -> list[np.ndarray]:
+    """Gọi API batch của estimator và kiểm tra số lượng depth map."""
+    normalized_frames = list(frames)
+    if not normalized_frames:
+        raise ValueError("Batch frame không được rỗng.")
+
+    # Bước 1: mọi estimator phải xử lý batch bằng một lời gọi thống nhất.
+    depths = list(estimator.predict_batch(normalized_frames))
+    if len(depths) != len(normalized_frames):
+        raise RuntimeError("Estimator trả về sai số lượng depth map trong batch.")
+    return depths

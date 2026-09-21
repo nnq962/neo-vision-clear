@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing_extensions import Annotated
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
@@ -78,43 +78,6 @@ class CameraConfig(CameraFields):
     id: str
     created_at: datetime
     updated_at: datetime
-
-    # ─────────────────────────────────────────────────────────────────────────
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_fields(cls, value: object) -> object:
-        """Đọc bản ghi cũ và gộp credentials trở lại URL source."""
-        if not isinstance(value, dict):
-            return value
-
-        # Bản sao tránh sửa object mà JSON loader hoặc caller đang sở hữu.
-        payload = dict(value)
-        username = payload.pop("username", None)
-        password = payload.pop("password", None)
-        for field_name in (
-            "source_type",
-            "enabled",
-            "use_gstreamer",
-        ):
-            payload.pop(field_name, None)
-
-        source = payload.get("source")
-        if username and isinstance(source, str):
-            parsed = urlsplit(source)
-            encoded_password = (
-                f":{quote(str(password), safe='')}" if password else ""
-            )
-            payload["source"] = urlunsplit(
-                (
-                    parsed.scheme,
-                    f"{quote(str(username), safe='')}{encoded_password}@{parsed.netloc}",
-                    parsed.path,
-                    parsed.query,
-                    parsed.fragment,
-                )
-            )
-        return payload
 
     # ─────────────────────────────────────────────────────────────────────────
 

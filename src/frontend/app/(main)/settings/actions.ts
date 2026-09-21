@@ -1,7 +1,5 @@
 import type { RuntimeConfig } from "@/lib/types/runtime"
 
-const NO_BASELINE_VALUE = "__none__"
-
 export type SaveRuntimeState = {
   status: "success" | "error"
   message: string
@@ -31,22 +29,28 @@ function readErrorMessage(payload: unknown): string {
 }
 
 function readNumber(formData: FormData, name: string): number {
-  return Number(formData.get(name))
+  const value = formData.get(name)
+  if (typeof value !== "string" || value.trim() === "") return Number.NaN
+  return Number(value)
 }
 
 export async function saveRuntimeConfig(
   formData: FormData
 ): Promise<SaveRuntimeState> {
-  const submittedBaselineId = String(
-    formData.get("active_baseline_id") ?? ""
-  ).trim()
-  const activeBaselineId =
-    submittedBaselineId && submittedBaselineId !== NO_BASELINE_VALUE
-      ? submittedBaselineId
-      : undefined
+  let activeBaselineIds: string[] = []
+  try {
+    const parsed: unknown = JSON.parse(
+      String(formData.get("active_baseline_ids") ?? "[]")
+    )
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+      activeBaselineIds = parsed
+    }
+  } catch {
+    return { status: "error", message: "Danh sách camera đã chọn không hợp lệ." }
+  }
   const runtime: RuntimeConfig = {
     enabled: formData.get("enabled") === "true",
-    activeBaselineId,
+    activeBaselineIds,
     snapshotMaxAgeSeconds: readNumber(formData, "snapshot_max_age_seconds"),
     logIntervalSeconds: readNumber(formData, "log_interval_seconds"),
     detection: {
@@ -74,7 +78,7 @@ export async function saveRuntimeConfig(
   if (numericValues.some((value) => !Number.isFinite(value))) {
     return { status: "error", message: "Các tham số số không hợp lệ." }
   }
-  if (runtime.enabled && !runtime.activeBaselineId) {
+  if (runtime.enabled && runtime.activeBaselineIds.length === 0) {
     return {
       status: "error",
       message: "Hãy chọn baseline trước khi bật runtime.",
@@ -83,7 +87,7 @@ export async function saveRuntimeConfig(
 
   const body = {
     enabled: runtime.enabled,
-    active_baseline_id: runtime.activeBaselineId ?? null,
+    active_baseline_ids: runtime.activeBaselineIds,
     snapshot_max_age_seconds: runtime.snapshotMaxAgeSeconds,
     log_interval_seconds: runtime.logIntervalSeconds,
     detection: {

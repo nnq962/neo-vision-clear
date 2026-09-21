@@ -154,7 +154,7 @@ export const CalibrationCameraWorkspace = forwardRef<
   const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(" ")
 
   return (
-    <Card>
+    <Card size="sm">
       {formId && (
         <input
           type="hidden"
@@ -165,7 +165,7 @@ export const CalibrationCameraWorkspace = forwardRef<
           )}
         />
       )}
-      <CardHeader>
+      <CardHeader className="border-b">
         <CardTitle>Chọn vùng lối đi</CardTitle>
         <CardDescription>
           Nhấn để đặt P1 → P4, sau đó kéo từng điểm để chỉnh vị trí.
@@ -177,12 +177,12 @@ export const CalibrationCameraWorkspace = forwardRef<
           </Badge>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-4">
+      <CardContent className="flex flex-1 flex-col gap-3">
         <div className="relative">
           <LiveCameraPlayer
             cameraId={camera?.id}
             cameraName={camera?.name}
-            className="min-h-80 pointer-events-none"
+            className="min-h-64 pointer-events-none"
             emptyMessage="Hãy cấu hình camera trước khi chọn ROI"
           />
           <svg
@@ -238,16 +238,16 @@ export const CalibrationCameraWorkspace = forwardRef<
               </g>
             ))}
           </svg>
-          <Badge className="pointer-events-none absolute left-4 top-4 z-30" variant="outline">
+          <Badge className="pointer-events-none absolute left-3 top-3 z-30" variant="outline">
             ROI · {points.length} điểm
           </Badge>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {Array.from({ length: MAX_POINTS }, (_, index) => {
             const point = points[index]
             return (
-              <div key={index} className="flex items-center gap-2">
+              <div key={index} className="flex items-center gap-2 rounded-lg border px-2.5 py-2">
                 <CircleDotIcon className="size-4 text-muted-foreground" />
                 <div>
                   <p className="text-sm font-medium">P{index + 1}</p>

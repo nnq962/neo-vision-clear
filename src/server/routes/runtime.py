@@ -72,17 +72,15 @@ def start_runtime(
     """Khởi động worker nền từ camera, baseline và runtime config đã lưu."""
     # Bước 1: resolve toàn bộ tham chiếu trước khi thay đổi trạng thái worker.
     runtime = store.get_runtime()
-    baseline_id = runtime.active_baseline_id
-    if baseline_id is None:
+    baseline_ids = runtime.active_baseline_ids
+    if not baseline_ids:
         raise HTTPException(
             status_code=409,
-            detail="Cần chọn active_baseline_id trước khi chạy runtime.",
+            detail="Cần chọn active_baseline_ids trước khi chạy runtime.",
         )
-    camera = store.get_current_camera()
-    if camera is None:
-        raise HTTPException(status_code=409, detail="Chưa có camera để chạy runtime.")
     try:
-        baseline = store.get_baseline(baseline_id)
+        baselines = [store.get_baseline(item) for item in baseline_ids]
+        cameras = [store.get_camera(item.camera_id) for item in baselines]
     except LookupError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -90,7 +88,7 @@ def start_runtime(
     enabled_runtime = runtime.model_copy(update={"enabled": True})
     try:
         store.update_runtime(enabled_runtime)
-        return service.start(camera, baseline, enabled_runtime)
+        return service.start(cameras, baselines, enabled_runtime)
     except (RuntimeBusyError, RuntimeStartError) as exc:
         # Hoàn tác cờ enabled nếu worker không nhận được lệnh start.
         store.update_runtime(runtime)

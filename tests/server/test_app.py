@@ -60,6 +60,13 @@ class FakeMonitorService:
         # Bước 1: dùng cùng store thật để giữ nguyên hành vi stale và error.
         return self.snapshot_store.read(self.settings.snapshot_max_age_seconds)
 
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def read_overview_snapshots(self) -> list[tuple[str, SnapshotRead]]:
+        """Trả snapshot giả dưới ID baseline để kiểm thử dashboard batch."""
+        # Bước 1: fake chỉ có một camera nhưng dùng cùng cấu trúc multi-camera.
+        return [("baseline-01", self.read_snapshot())]
+
 
 class FakeCameraConnectionTester:
     """Ghi nhận thao tác khôi phục camera trong lifespan."""
@@ -121,12 +128,16 @@ class ServerAppTestCase(unittest.TestCase):
 
     # ────────────────────────────────────────────────────────────────────────
 
-    def test_lifespan_restores_persisted_camera_path(self) -> None:
-        """Startup phải đăng ký lại camera đã lưu vào MediaMTX."""
+    def test_lifespan_restores_all_persisted_camera_paths(self) -> None:
+        """Startup phải đăng ký lại mọi camera đã lưu vào MediaMTX."""
         store = ConfigStore(self.config_path)
-        camera = store.create_camera(
-            CameraCreate(name="Camera", source="rtsp://camera/stream"),
+        first_camera = store.create_camera(
+            CameraCreate(name="Camera 1", source="rtsp://camera-1/stream"),
             camera_id="camera-01",
+        )
+        second_camera = store.create_camera(
+            CameraCreate(name="Camera 2", source="rtsp://camera-2/stream"),
+            camera_id="camera-02",
         )
         tester = FakeCameraConnectionTester()
         application = create_app(
@@ -139,7 +150,13 @@ class ServerAppTestCase(unittest.TestCase):
         with TestClient(application) as client:
             self.assertEqual(client.get("/health").status_code, 200)
 
-        self.assertEqual(tester.restored, [(camera.id, camera)])
+        self.assertEqual(
+            tester.restored,
+            [
+                (first_camera.id, first_camera),
+                (second_camera.id, second_camera),
+            ],
+        )
 
     # ────────────────────────────────────────────────────────────────────────
 
@@ -272,10 +289,14 @@ class ServerAppTestCase(unittest.TestCase):
 
         self.assertEqual(response["type"], "overview_info")
         self.assertEqual(response["request_id"], "overview-01")
-        self.assertEqual(response["status"], "ok")
-        self.assertEqual(response["data"]["changed_zones"][0]["area_ratio"], 0.04)
+        self.assertEqual(response["items"][0]["baseline_id"], "baseline-01")
+        self.assertEqual(response["items"][0]["status"], "ok")
         self.assertEqual(
-            response["data"]["changed_zones"][0]["polygon"],
+            response["items"][0]["data"]["changed_zones"][0]["area_ratio"],
+            0.04,
+        )
+        self.assertEqual(
+            response["items"][0]["data"]["changed_zones"][0]["polygon"],
             [[0.2, 0.3], [0.4, 0.3], [0.4, 0.6]],
         )
 

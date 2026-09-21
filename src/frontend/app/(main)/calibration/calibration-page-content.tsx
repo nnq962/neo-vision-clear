@@ -3,14 +3,15 @@
 import Image from "next/image"
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import {
+  CameraIcon,
   CheckCircle2Icon,
   Clock3Icon,
   FocusIcon,
   ImageIcon,
-  InfoIcon,
   LoaderCircleIcon,
   MapPinnedIcon,
   SaveIcon,
+  Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -24,6 +25,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -50,7 +52,7 @@ import type {
 } from "@/lib/types/calibration"
 import type { CameraIdentity } from "@/lib/types/camera"
 
-import { saveAndStartBaseline } from "./actions"
+import { deleteBaseline, saveAndStartBaseline } from "./actions"
 
 const FORM_ID = "calibration-form"
 const DEFAULT_WORLD_POINTS: CalibrationPoint[] = [
@@ -147,33 +149,50 @@ function statusBadgeVariant(
 }
 
 export function CalibrationPageContent({
-  camera,
+  cameras,
   initialBaselines,
   initialRunStatuses,
 }: {
-  camera?: CameraIdentity
+  cameras: CameraIdentity[]
   initialBaselines: BaselineConfig[]
   initialRunStatuses: Record<string, CalibrationRunStatus>
 }) {
-  const [baselines, setBaselines] = useState(initialBaselines)
+  const initialCameraId = cameras[0]?.id ?? ""
+  const [selectedCameraId, setSelectedCameraId] = useState(initialCameraId)
+  const [allBaselines, setAllBaselines] = useState(initialBaselines)
+  const camera = cameras.find((item) => item.id === selectedCameraId)
+  const baselines = useMemo(
+    () =>
+      allBaselines.filter(
+        (baseline) => baseline.cameraId === selectedCameraId
+      ),
+    [allBaselines, selectedCameraId]
+  )
   const [draft, setDraft] = useState(() =>
-    createEmptyDraft(nextBaselineNumber(initialBaselines))
+    createEmptyDraft(
+      nextBaselineNumber(
+        initialBaselines.filter(
+          (baseline) => baseline.cameraId === initialCameraId
+        )
+      )
+    )
   )
   const workspaceRef = useRef<CalibrationCameraWorkspaceHandle>(null)
   const [runStatuses, setRunStatuses] = useState<
     Record<string, CalibrationRunStatus>
   >(initialRunStatuses)
   const [pending, startTransition] = useTransition()
-  const baselineIds = useMemo(
-    () => baselines.map((baseline) => baseline.id),
-    [baselines]
+  const [deletingBaselineId, setDeletingBaselineId] = useState<string>()
+  const allBaselineIds = useMemo(
+    () => allBaselines.map((baseline) => baseline.id),
+    [allBaselines]
   )
   const runningIds = useMemo(
     () =>
-      baselineIds.filter(
+      allBaselineIds.filter(
         (baselineId) => runStatuses[baselineId]?.status === "running"
       ),
-    [baselineIds, runStatuses]
+    [allBaselineIds, runStatuses]
   )
 
   function resetEditor(nextNumber: number) {
@@ -199,10 +218,16 @@ export function CalibrationPageContent({
         const savedBaseline = result.baseline
         const nextBaselines = [
           savedBaseline,
-          ...baselines.filter((item) => item.id !== savedBaseline.id),
+          ...allBaselines.filter((item) => item.id !== savedBaseline.id),
         ]
-        setBaselines(nextBaselines)
-        resetEditor(nextBaselineNumber(nextBaselines))
+        setAllBaselines(nextBaselines)
+        resetEditor(
+          nextBaselineNumber(
+            nextBaselines.filter(
+              (item) => item.cameraId === selectedCameraId
+            )
+          )
+        )
       }
       if (result.status === "error" || !result.baseline || !result.run) {
         toast.error(result.message)
@@ -216,6 +241,41 @@ export function CalibrationPageContent({
 
       toast.success(result.message)
     })
+  }
+
+  function handleCameraChange(cameraId: string | null) {
+    if (!cameraId || cameraId === selectedCameraId) return
+    setSelectedCameraId(cameraId)
+    resetEditor(
+      nextBaselineNumber(
+        allBaselines.filter((baseline) => baseline.cameraId === cameraId)
+      )
+    )
+  }
+
+  async function handleDeleteBaseline(baseline: BaselineConfig) {
+    const confirmed = window.confirm(
+      `Xoá baseline '${baseline.name}'? Cấu hình và toàn bộ ảnh kết quả sẽ bị xoá.`
+    )
+    if (!confirmed) return
+
+    setDeletingBaselineId(baseline.id)
+    const result = await deleteBaseline(baseline.id)
+    setDeletingBaselineId(undefined)
+    if (result.status === "error") {
+      toast.error(result.message)
+      return
+    }
+
+    setAllBaselines((current) =>
+      current.filter((item) => item.id !== baseline.id)
+    )
+    setRunStatuses((current) => {
+      const next = { ...current }
+      delete next[baseline.id]
+      return next
+    })
+    toast.success(result.message)
   }
 
   function updateWorldPoint(index: number, axis: 0 | 1, value: string) {
@@ -286,25 +346,58 @@ export function CalibrationPageContent({
   }, [runningIds])
 
   return (
-    <div className="flex flex-1 flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Calibration</h1>
-        <p className="text-muted-foreground">
-          Lưu cấu hình để bắt đầu calibration, sau đó xem kết quả bên dưới.
-        </p>
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Calibration</h1>
+          <p className="text-muted-foreground">
+            Chọn vùng lối đi và tạo baseline cho từng camera.
+          </p>
+        </div>
+        <div className="sm:w-72">
+          <Select
+            items={cameras.map((item) => ({
+              label: item.name,
+              value: item.id,
+            }))}
+            value={selectedCameraId}
+            onValueChange={handleCameraChange}
+            disabled={cameras.length === 0 || pending}
+          >
+            <SelectTrigger
+              id="calibration-camera"
+              className="w-full"
+              aria-label="Camera calibration"
+            >
+              <CameraIcon />
+              <SelectValue placeholder="Chọn camera" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Camera đã cấu hình</SelectLabel>
+                {cameras.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <Alert>
-        <InfoIcon />
-        <AlertTitle>Camera phải được giữ cố định</AlertTitle>
-        <AlertDescription>
-          Hãy bảo đảm lối đi hoàn toàn trống trước khi lưu. Sau khi lưu, hệ
-          thống bắt đầu thu frame và tự chuẩn bị form cho baseline tiếp theo.
-        </AlertDescription>
-      </Alert>
+      {cameras.length === 0 ? (
+        <Alert variant="destructive">
+          <TriangleAlertIcon />
+          <AlertTitle>Chưa có camera để calibration</AlertTitle>
+          <AlertDescription>
+            Hãy thêm ít nhất một camera tại trang Camera trước khi thiết lập ROI.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <div
-        className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.65fr)]"
+        className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(21rem,0.65fr)]"
       >
         <CalibrationCameraWorkspace
           ref={workspaceRef}
@@ -312,17 +405,18 @@ export function CalibrationPageContent({
           formId={FORM_ID}
         />
 
-        <Card>
-          <CardHeader>
+        <Card size="sm">
+          <CardHeader className="border-b">
             <CardTitle>Baseline mới</CardTitle>
             <CardDescription>
-              Điền cấu hình và lưu để bắt đầu calibration ngay.
+              Giữ camera cố định và bảo đảm lối đi đang trống.
             </CardDescription>
           </CardHeader>
           <form id={FORM_ID} action={handleSave} className="flex flex-1 flex-col">
+            <input type="hidden" name="camera_id" value={selectedCameraId} />
             <CardContent>
               <Tabs defaultValue="baseline">
-                <TabsList>
+                <TabsList className="w-full">
                   <TabsTrigger value="baseline">
                     <FocusIcon />
                     Thu baseline
@@ -333,9 +427,9 @@ export function CalibrationPageContent({
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="baseline" className="pt-4" keepMounted>
-                  <div className="grid gap-5">
-                    <div className="grid gap-2">
+                <TabsContent value="baseline" className="pt-3" keepMounted>
+                  <div className="grid gap-4">
+                    <div className="grid gap-1.5">
                       <Label htmlFor="baseline-name">Tên baseline</Label>
                       <Input
                         id="baseline-name"
@@ -351,7 +445,7 @@ export function CalibrationPageContent({
                       />
                     </div>
 
-                    <div className="grid gap-2">
+                    <div className="grid gap-1.5">
                       <Label htmlFor="encoder">Depth encoder</Label>
                       <Select
                         name="encoder"
@@ -383,8 +477,8 @@ export function CalibrationPageContent({
                       </Select>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="grid gap-2">
+                    <div className="grid gap-4">
+                      <div className="grid gap-1.5">
                         <Label htmlFor="frame-count">Số frame</Label>
                         <Input
                           id="frame-count"
@@ -401,7 +495,7 @@ export function CalibrationPageContent({
                           required
                         />
                       </div>
-                      <div className="grid gap-2">
+                      <div className="grid gap-1.5">
                         <Label htmlFor="input-size">Input size</Label>
                         <Select
                           name="input_size"
@@ -433,7 +527,7 @@ export function CalibrationPageContent({
                       </div>
                     </div>
 
-                    <div className="grid gap-2">
+                    <div className="grid gap-1.5">
                       <Label htmlFor="process-width">Process width</Label>
                       <Input
                         id="process-width"
@@ -453,11 +547,11 @@ export function CalibrationPageContent({
                   </div>
                 </TabsContent>
 
-                <TabsContent value="coordinates" className="pt-4" keepMounted>
-                  <div className="grid gap-4">
-                    <div className="grid gap-4 sm:grid-cols-2">
+                <TabsContent value="coordinates" className="pt-3" keepMounted>
+                  <div className="grid gap-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       {draft.worldPoints.map(([xValue, yValue], index) => (
-                        <div key={index} className="grid gap-2">
+                        <div key={index} className="grid gap-1.5">
                           <Label>P{index + 1}</Label>
                           <div className="grid grid-cols-2 gap-2">
                             <Input
@@ -514,19 +608,22 @@ export function CalibrationPageContent({
         </Card>
       </div>
 
-      <section className="grid gap-4" aria-labelledby="baseline-results-title">
-        <div>
-          <h2 id="baseline-results-title" className="text-xl font-semibold tracking-tight">
-            Kết quả baseline
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Mỗi baseline có ảnh camera kèm ROI và heatmap depth riêng.
-          </p>
+      <section className="grid gap-3" aria-labelledby="baseline-results-title">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 id="baseline-results-title" className="text-lg font-semibold tracking-tight">
+              Baseline đã tạo
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Ảnh ROI và depth của camera đang chọn.
+            </p>
+          </div>
+          <Badge variant="secondary">{baselines.length} baseline</Badge>
         </div>
 
         {baselines.length === 0 ? (
-          <Card>
-            <CardContent className="flex min-h-40 items-center justify-center">
+          <Card size="sm">
+            <CardContent className="flex min-h-32 items-center justify-center">
               <div className="text-center text-muted-foreground">
                 <ImageIcon className="mx-auto mb-3 size-8" />
                 <p>Chưa có baseline nào được lưu.</p>
@@ -534,7 +631,7 @@ export function CalibrationPageContent({
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-2">
             {baselines.map((baseline) => {
               const run = runStatuses[baseline.id]
               const progress = run?.totalFrames
@@ -545,26 +642,48 @@ export function CalibrationPageContent({
               return (
                 <Card
                   key={baseline.id}
+                  size="sm"
                   className="[contain-intrinsic-size:auto_32rem] [content-visibility:auto]"
                 >
-                  <CardHeader>
+                  <CardHeader className="border-b">
                     <CardTitle>{baseline.name}</CardTitle>
-                    <CardDescription>
-                      {baseline.encoder.toUpperCase()} · {baseline.frameCount} frame ·{" "}
-                      {new Date(baseline.createdAt).toLocaleString("vi-VN")}
+                    <CardDescription className="flex flex-wrap gap-1.5 pt-1">
+                      <Badge variant="outline">{baseline.encoder.toUpperCase()}</Badge>
+                      <Badge variant="outline">{baseline.frameCount} frame</Badge>
+                      <Badge variant="outline">Input {baseline.inputSize}</Badge>
+                      <Badge variant="outline">Width {baseline.processWidth}</Badge>
                     </CardDescription>
-                    <Badge variant={statusBadgeVariant(run)}>
-                      {run?.status === "running" ? (
-                        <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
-                      ) : run?.status === "completed" ? (
-                        <CheckCircle2Icon data-icon="inline-start" />
-                      ) : run?.status === "failed" ? (
-                        <TriangleAlertIcon data-icon="inline-start" />
-                      ) : (
-                        <Clock3Icon data-icon="inline-start" />
-                      )}
-                      {statusLabel(run)}
-                    </Badge>
+                    <CardAction className="flex items-center gap-2">
+                      <Badge variant={statusBadgeVariant(run)}>
+                        {run?.status === "running" ? (
+                          <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+                        ) : run?.status === "completed" ? (
+                          <CheckCircle2Icon data-icon="inline-start" />
+                        ) : run?.status === "failed" ? (
+                          <TriangleAlertIcon data-icon="inline-start" />
+                        ) : (
+                          <Clock3Icon data-icon="inline-start" />
+                        )}
+                        {statusLabel(run)}
+                      </Badge>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon-sm"
+                        aria-label={`Xoá baseline ${baseline.name}`}
+                        disabled={
+                          run?.status === "running" ||
+                          deletingBaselineId === baseline.id
+                        }
+                        onClick={() => void handleDeleteBaseline(baseline)}
+                      >
+                        {deletingBaselineId === baseline.id ? (
+                          <LoaderCircleIcon className="animate-spin" />
+                        ) : (
+                          <Trash2Icon />
+                        )}
+                      </Button>
+                    </CardAction>
                   </CardHeader>
                   <CardContent>
                     {run?.status === "running" ? (
@@ -581,28 +700,28 @@ export function CalibrationPageContent({
                       </Alert>
                     ) : run?.artifactAvailable ? (
                       <Tabs defaultValue="preview">
-                        <TabsList>
+                        <TabsList className="w-full">
                           <TabsTrigger value="preview">Ảnh ROI</TabsTrigger>
                           <TabsTrigger value="depth">Depth</TabsTrigger>
                         </TabsList>
-                        <TabsContent value="preview" className="pt-4">
+                        <TabsContent value="preview" className="pt-3">
                           <Image
                             src={`/api/calibration/${baseline.id}/images/preview?v=${imageVersion}`}
                             alt={`Ảnh ROI của ${baseline.name}`}
                             width={960}
                             height={540}
                             unoptimized
-                            className="h-auto w-full"
+                            className="h-auto w-full rounded-lg"
                           />
                         </TabsContent>
-                        <TabsContent value="depth" className="pt-4">
+                        <TabsContent value="depth" className="pt-3">
                           <Image
                             src={`/api/calibration/${baseline.id}/images/depth?v=${imageVersion}`}
                             alt={`Heatmap depth của ${baseline.name}`}
                             width={960}
                             height={540}
                             unoptimized
-                            className="h-auto w-full"
+                            className="h-auto w-full rounded-lg"
                           />
                         </TabsContent>
                       </Tabs>

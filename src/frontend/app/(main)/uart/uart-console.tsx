@@ -88,6 +88,11 @@ function uartWebSocketUrl(): string {
     const baseUrl = configuredUrl.replace(/\/ws\/(corridor|overview|uart)$/, "")
     return `${baseUrl}/ws/uart`
   }
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, "")
+  if (backendUrl) {
+    const baseUrl = backendUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:")
+    return `${baseUrl}/ws/uart`
+  }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
   return `${protocol}//${window.location.host}/ws/uart`
 }

@@ -1,5 +1,7 @@
 """Kiểm thử vòng đời worker runtime độc lập với request FastAPI."""
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,12 +29,14 @@ class BlockingPipeline:
     def __init__(self, **_kwargs):
         """Tạo cờ để test biết worker đã đi vào vòng chạy."""
         self.started = threading.Event()
+        self.sources: list[str] | None = None
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def run(self, _source, *, stop_event, **_kwargs) -> int:
+    def run(self, sources: list[str], *, stop_event, **_kwargs) -> int:
         """Chờ tín hiệu dừng giống một nguồn camera chạy liên tục."""
         # Bước 1: công bố đã chạy rồi chờ có giới hạn để test không bị treo.
+        self.sources = sources
         self.started.set()
         stop_event.wait(timeout=2.0)
         return 1
@@ -72,7 +76,7 @@ class MonitorServiceTestCase(unittest.TestCase):
         )
         self.runtime = RuntimeConfig(
             enabled=True,
-            active_baseline_id=self.baseline.id,
+            active_baseline_ids=[self.baseline.id],
         )
         artifact_path = artifact_path_for_id(
             self.baselines_directory,
@@ -140,7 +144,7 @@ class MonitorServiceTestCase(unittest.TestCase):
         )
 
         started_at = time.monotonic()
-        response = service.start(self.camera, self.baseline, self.runtime)
+        response = service.start([self.camera], [self.baseline], self.runtime)
         elapsed = time.monotonic() - started_at
 
         self.assertEqual(response.status, "starting")
@@ -160,7 +164,7 @@ class MonitorServiceTestCase(unittest.TestCase):
             estimator_factory=lambda **_kwargs: object(),
             pipeline_factory=lambda **_kwargs: pipeline,
         )
-        service.start(self.camera, self.baseline, self.runtime)
+        service.start([self.camera], [self.baseline], self.runtime)
         self.assertTrue(pipeline.started.wait(timeout=1.0))
 
         stopped_at = time.monotonic()
@@ -169,6 +173,92 @@ class MonitorServiceTestCase(unittest.TestCase):
 
         self.assertEqual(response.status, "stopping")
         self.assertLess(elapsed, 0.2)
+        self._wait_for_status(service, "stopped")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_single_camera_uses_camera_batch_pipeline(self) -> None:
+        """Worker một camera cũng dùng pipeline nhận danh sách một nguồn."""
+        pipeline = BlockingPipeline()
+        received_options: dict[str, object] = {}
+
+        def create_pipeline(**options):
+            """Ghi nhận tham số khởi tạo rồi trả pipeline giả."""
+            received_options.update(options)
+            return pipeline
+
+        service = MonitorService(
+            self._settings(),
+            estimator_factory=lambda **_kwargs: object(),
+            pipeline_factory=create_pipeline,
+        )
+        service.start([self.camera], [self.baseline], self.runtime)
+        self.assertTrue(pipeline.started.wait(timeout=1.0))
+        self.assertEqual(len(received_options["baselines"]), 1)
+        self.assertEqual(pipeline.sources, [service._camera_stream_url(self.camera.id)])
+        service.stop(wait=False)
+        self._wait_for_status(service, "stopped")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_multiple_cameras_use_shared_camera_batch_pipeline(self) -> None:
+        """Worker dùng cùng pipeline cho toàn bộ camera trong batch."""
+        second_camera = self.camera.model_copy(
+            update={"id": "camera-02", "name": "Camera 2"}
+        )
+        second_baseline = self.baseline.model_copy(
+            update={"id": "baseline-02", "camera_id": second_camera.id}
+        )
+        second_artifact = artifact_path_for_id(
+            self.baselines_directory,
+            second_baseline.id,
+        )
+        second_artifact.parent.mkdir(parents=True)
+        second_artifact.touch()
+        pipeline = BlockingPipeline()
+        received_options: dict[str, object] = {}
+
+        def create_pipeline(**options):
+            """Ghi nhận cấu hình pipeline rồi trả pipeline giả."""
+            received_options.update(options)
+            return pipeline
+
+        service = MonitorService(
+            self._settings(),
+            estimator_factory=lambda **_kwargs: object(),
+            pipeline_factory=create_pipeline,
+        )
+        runtime = self.runtime.model_copy(
+            update={
+                "active_baseline_ids": [
+                    self.baseline.id,
+                    second_baseline.id,
+                ],
+            }
+        )
+
+        response = service.start(
+            [self.camera, second_camera],
+            [self.baseline, second_baseline],
+            runtime,
+        )
+
+        self.assertEqual(
+            response.active_baseline_ids,
+            [self.baseline.id, second_baseline.id],
+        )
+        self.assertTrue(pipeline.started.wait(timeout=1.0))
+        self.assertEqual(len(received_options["baselines"]), 2)
+        self.assertEqual(len(pipeline.sources), 2)
+        overview = service.read_overview_snapshots()
+        self.assertEqual(
+            [baseline_id for baseline_id, _reading in overview],
+            [self.baseline.id, second_baseline.id],
+        )
+        self.assertTrue(
+            all(reading.status == "warming_up" for _baseline_id, reading in overview)
+        )
+        service.stop(wait=False)
         self._wait_for_status(service, "stopped")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -184,7 +274,7 @@ class MonitorServiceTestCase(unittest.TestCase):
             estimator_factory=broken_estimator,
         )
 
-        response = service.start(self.camera, self.baseline, self.runtime)
+        response = service.start([self.camera], [self.baseline], self.runtime)
 
         self.assertEqual(response.status, "starting")
         self._wait_for_status(service, "failed")
@@ -209,7 +299,7 @@ class MonitorServiceTestCase(unittest.TestCase):
             pipeline_factory=lambda **_kwargs: pipeline,
         )
         with patch("server.services.monitor.release_worker_memory", slow_cleanup):
-            service.start(self.camera, self.baseline, self.runtime)
+            service.start([self.camera], [self.baseline], self.runtime)
             self.assertTrue(pipeline.started.wait(timeout=1.0))
             service.stop(wait=False)
             self.assertTrue(cleanup_started.wait(timeout=1.0))
@@ -243,7 +333,7 @@ class MonitorServiceTestCase(unittest.TestCase):
         service = MonitorService(self._settings())
 
         with self.assertRaises(RuntimeStartError):
-            service.start(self.camera, missing, self.runtime)
+            service.start([self.camera], [missing], self.runtime)
 
         self.assertEqual(service.status().status, "stopped")
 

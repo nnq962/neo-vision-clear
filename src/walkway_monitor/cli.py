@@ -9,12 +9,14 @@ from walkway_monitor.calibration.pipeline import CalibrationPipeline
 from walkway_monitor.calibration.storage import load_baseline
 from walkway_monitor.config import (
     DEFAULT_BASELINE_PATH,
+    DEFAULT_INFERENCE_BATCH_SIZE,
     SUPPORTED_ENCODERS,
     CalibrationConfig,
     DetectionConfig,
     default_checkpoint_path,
 )
 from walkway_monitor.depth.estimator import DepthAnythingEstimator
+from walkway_monitor.detection.camera_batch_pipeline import CameraBatchDetectionPipeline
 from walkway_monitor.detection.pipeline import DetectionPipeline
 
 
@@ -45,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     calibration_parser.add_argument("--frames", type=int, default=60)
     calibration_parser.add_argument("--input-size", type=int, default=518)
+    calibration_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_INFERENCE_BATCH_SIZE,
+        help="Số frame suy luận trong một forward; tăng sẽ dùng thêm bộ nhớ.",
+    )
     calibration_parser.add_argument("--process-width", type=int, default=960)
     calibration_parser.add_argument(
         "--output",
@@ -72,12 +80,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     detection_parser.add_argument(
         "--source",
+        action="append",
         required=True,
-        help="RTSP/RTMP URL, đường dẫn video hoặc webcam index.",
+        help="Nguồn camera; lặp lại flag để chạy nhiều RTSP trong cùng batch.",
     )
     detection_parser.add_argument(
         "--baseline",
-        default=DEFAULT_BASELINE_PATH,
+        action="append",
+        help=(
+            "Baseline tương ứng từng source; lặp lại theo cùng thứ tự. "
+            f"Một source mặc định dùng {DEFAULT_BASELINE_PATH}."
+        ),
     )
     detection_parser.add_argument(
         "--checkpoint",
@@ -92,6 +105,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Độ phân giải raster dùng để đo mask BEV.",
     )
     detection_parser.add_argument("--depth-blur-kernel", type=int, default=5)
+    detection_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_INFERENCE_BATCH_SIZE,
+        help=(
+            "Nguồn đơn: số frame liên tiếp mỗi forward. Nhiều RTSP: "
+            "batch tự bằng số camera và không gom frame theo thời gian."
+        ),
+    )
     detection_parser.add_argument("--check-area-padding", type=int, default=12)
     detection_parser.add_argument(
         "--no-depth-alignment",
@@ -148,6 +170,8 @@ def parse_source(value: str) -> str | int:
 
 def run_calibration(args: argparse.Namespace) -> int:
     """Khởi tạo các dependency và chạy subcommand calibration."""
+    if args.batch_size < 1:
+        raise ValueError("batch_size phải lớn hơn hoặc bằng 1.")
     config = CalibrationConfig(
         frame_count=args.frames,
         input_size=args.input_size,
@@ -161,7 +185,11 @@ def run_calibration(args: argparse.Namespace) -> int:
         encoder=args.encoder,
         input_size=args.input_size,
     )
-    pipeline = CalibrationPipeline(estimator=estimator, config=config)
+    pipeline = CalibrationPipeline(
+        estimator=estimator,
+        config=config,
+        batch_size=args.batch_size,
+    )
     pipeline.run(
         source=parse_source(args.source),
         output_path=args.output,
@@ -179,7 +207,19 @@ def run_calibration(args: argparse.Namespace) -> int:
 
 def run_detection(args: argparse.Namespace) -> int:
     """Đọc baseline, khởi tạo model và chạy pipeline detection full frame."""
-    baseline = load_baseline(args.baseline)
+    if args.batch_size < 1:
+        raise ValueError("batch_size phải lớn hơn hoặc bằng 1.")
+    source_values = args.source if isinstance(args.source, list) else [args.source]
+    baseline_values = args.baseline or [DEFAULT_BASELINE_PATH]
+    if isinstance(baseline_values, (str, bytes)):
+        baseline_values = [baseline_values]
+    if len(source_values) != len(baseline_values):
+        raise ValueError(
+            "Số --baseline phải bằng số --source khi chạy nhiều camera."
+        )
+    sources = [parse_source(source) for source in source_values]
+    baselines = [load_baseline(path) for path in baseline_values]
+    baseline = baselines[0]
     config = DetectionConfig(
         noise_multiplier=args.noise_multiplier,
         minimum_difference=args.minimum_difference,
@@ -197,20 +237,43 @@ def run_detection(args: argparse.Namespace) -> int:
         encoder=baseline.encoder,
         input_size=baseline.input_size,
     )
-    pipeline = DetectionPipeline(
-        estimator=estimator,
-        baseline=baseline,
-        config=config,
-        display=not args.no_display,
-        show_depth_heatmaps=args.depth_heatmaps,
-        log_interval=args.log_interval,
-    )
-    pipeline.run(
-        source=parse_source(args.source),
-        use_gstreamer=not args.no_gstreamer,
-        open_timeout_ms=args.open_timeout_ms,
-        read_timeout_ms=args.read_timeout_ms,
-    )
+    if len(sources) == 1:
+        pipeline = DetectionPipeline(
+            estimator=estimator,
+            baseline=baseline,
+            config=config,
+            display=not args.no_display,
+            show_depth_heatmaps=args.depth_heatmaps,
+            log_interval=args.log_interval,
+            batch_size=args.batch_size,
+        )
+        pipeline.run(
+            source=sources[0],
+            use_gstreamer=not args.no_gstreamer,
+            open_timeout_ms=args.open_timeout_ms,
+            read_timeout_ms=args.read_timeout_ms,
+        )
+    else:
+        # Mỗi batch chứa một frame mới nhất của từng camera, không gom nhiều
+        # frame liên tiếp của cùng RTSP nên độ trễ không nhân theo batch_size.
+        LOGGER.info(
+            "Chạy multi-camera với batch tự động bằng %d source.",
+            len(sources),
+        )
+        batch_pipeline = CameraBatchDetectionPipeline(
+            estimator=estimator,
+            baselines=baselines,
+            config=config,
+            display=not args.no_display,
+            show_depth_heatmaps=args.depth_heatmaps,
+            log_interval=args.log_interval,
+        )
+        batch_pipeline.run(
+            sources=sources,
+            use_gstreamer=not args.no_gstreamer,
+            open_timeout_ms=args.open_timeout_ms,
+            read_timeout_ms=args.read_timeout_ms,
+        )
     return 0
 
 

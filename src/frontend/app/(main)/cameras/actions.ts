@@ -1,8 +1,9 @@
+import type { Camera } from "@/lib/types/camera"
+
 export type SaveCameraState = {
   status: "idle" | "success" | "error"
   message: string
-  cameraId?: string
-  cameraName?: string
+  camera?: Camera
 }
 
 function readErrorMessage(payload: unknown): string {
@@ -54,15 +55,28 @@ export async function saveCamera(
       typeof payload !== "object" ||
       payload === null ||
       !("id" in payload) ||
-      typeof payload.id !== "string"
+      typeof payload.id !== "string" ||
+      !("name" in payload) ||
+      typeof payload.name !== "string" ||
+      !("source" in payload) ||
+      typeof payload.source !== "string" ||
+      !("open_timeout_ms" in payload) ||
+      typeof payload.open_timeout_ms !== "number" ||
+      !("read_timeout_ms" in payload) ||
+      typeof payload.read_timeout_ms !== "number"
     ) {
       return { status: "error", message: "Backend trả dữ liệu camera không hợp lệ." }
     }
     return {
       status: "success",
-      message: "Camera hợp lệ và đã được lưu.",
-      cameraId: payload.id,
-      cameraName: name,
+      message: "Camera hợp lệ và đã được thêm.",
+      camera: {
+        id: payload.id,
+        name: payload.name,
+        source: payload.source,
+        openTimeoutMs: payload.open_timeout_ms,
+        readTimeoutMs: payload.read_timeout_ms,
+      },
     }
   } catch {
     return {

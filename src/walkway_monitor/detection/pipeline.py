@@ -12,7 +12,7 @@ import numpy as np
 from media_sources import MediaSources
 from utils.logger import LOGGER
 from walkway_monitor.config import DetectionConfig
-from walkway_monitor.depth.estimator import DepthEstimator
+from walkway_monitor.depth.estimator import DepthEstimator, predict_depth_batch
 from walkway_monitor.detection.detector import WalkwayAnalyzer
 from walkway_monitor.detection.models import CorridorSnapshot, DetectionOutput
 from walkway_monitor.models import BaselineArtifact
@@ -30,10 +30,13 @@ class DetectionPipeline:
         display: bool = True,
         show_depth_heatmaps: bool = True,
         log_interval: float = 2.0,
+        batch_size: int = 1,
     ):
         """Khởi tạo analyzer và lưu các dependency chạy realtime."""
         if log_interval < 0:
             raise ValueError("log_interval không được âm.")
+        if batch_size < 1:
+            raise ValueError("batch_size phải lớn hơn hoặc bằng 1.")
         self._estimator = estimator
         self._baseline = baseline
         self._analyzer = WalkwayAnalyzer(baseline, config)
@@ -41,6 +44,7 @@ class DetectionPipeline:
         self._display = display
         self._show_depth_heatmaps = show_depth_heatmaps
         self._log_interval = log_interval
+        self._batch_size = batch_size
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -70,104 +74,121 @@ class DetectionPipeline:
         window_publish_time = 0.0
         window_render_time = 0.0
         LOGGER.info(
-            "Bắt đầu phân tích full frame ở độ phân giải %dx%d.",
+            "Bắt đầu phân tích full frame ở độ phân giải %dx%d | batch=%d.",
             self._baseline.frame_width,
             self._baseline.frame_height,
+            self._batch_size,
         )
         try:
             with MediaSources(source, **media_options) as media:
                 media_iterator = iter(media)
                 while True:
-                    # Bước 1: đo cả thời gian chờ/giải mã frame trong reader.
-                    source_started = time.perf_counter()
-                    try:
-                        frames, _metas = next(media_iterator)
-                    except StopIteration:
+                    # Bước 1: gom nhiều frame liên tiếp từ cùng nguồn media.
+                    batch_frames: list[np.ndarray] = []
+                    source_time = 0.0
+                    resize_time = 0.0
+                    source_ended = False
+                    for _index in range(self._batch_size):
+                        if stop_event is not None and stop_event.is_set():
+                            break
+                        source_started = time.perf_counter()
+                        try:
+                            frames, _metas = next(media_iterator)
+                        except StopIteration:
+                            source_time += time.perf_counter() - source_started
+                            source_ended = True
+                            break
+                        source_time += time.perf_counter() - source_started
+                        resize_started = time.perf_counter()
+                        batch_frames.append(
+                            resize_to_baseline(frames[0], self._baseline)
+                        )
+                        resize_time += time.perf_counter() - resize_started
+                    if not batch_frames:
                         break
-                    source_time = time.perf_counter() - source_started
 
-                    # Cho phép lifespan của server dừng worker mà không phải
-                    # kết thúc cưỡng bức process đang chạy.
-                    if stop_event is not None and stop_event.is_set():
-                        break
-                    resize_started = time.perf_counter()
-                    frame = resize_to_baseline(frames[0], self._baseline)
-                    resize_time = time.perf_counter() - resize_started
-
+                    # Bước 2: chỉ gọi estimator một lần cho toàn bộ batch.
                     inference_started = time.perf_counter()
-                    depth = self._estimator.predict(frame)
+                    batch_depths = predict_depth_batch(
+                        self._estimator,
+                        batch_frames,
+                    )
                     inference_time = time.perf_counter() - inference_started
-
-                    output = self._analyzer.process(depth)
-                    analysis_time = output.timings.total_seconds
-
-                    # Bước 2: callback có thể gồm contour, khóa snapshot hoặc
-                    # tích hợp bên ngoài nên được đo riêng khỏi analyzer.
-                    publish_started = time.perf_counter()
-                    if on_snapshot is not None:
-                        on_snapshot(output.snapshot)
-                    if on_output is not None:
-                        on_output(output)
-                    publish_time = time.perf_counter() - publish_started
-                    processed_frames += 1
-
                     now = time.perf_counter()
-                    instant_fps = 1.0 / max(now - last_time, 1e-6)
+                    instant_fps = len(batch_frames) / max(now - last_time, 1e-6)
                     smooth_fps = (
                         instant_fps
                         if smooth_fps == 0.0
                         else 0.9 * smooth_fps + 0.1 * instant_fps
                     )
                     last_time = now
-                    render_time = 0.0
+                    batch_count = len(batch_frames)
                     should_stop = False
-                    if self._display:
-                        render_started = time.perf_counter()
-                        should_stop = self._show(frame, output, smooth_fps)
-                        render_time = time.perf_counter() - render_started
 
-                    window_frames += 1
-                    window_source_time += source_time
-                    window_resize_time += resize_time
-                    window_inference_time += inference_time
-                    window_analysis_time += analysis_time
-                    window_alignment_time += output.timings.alignment_seconds
-                    window_mask_time += output.timings.mask_seconds
-                    window_bev_time += output.timings.bev_seconds
-                    window_publish_time += publish_time
-                    window_render_time += render_time
-                    log_time = time.perf_counter()
-                    window_elapsed = log_time - window_started
-                    if (
-                        self._log_interval > 0
-                        and window_elapsed >= self._log_interval
-                    ):
-                        self._log_performance(
-                            frames=window_frames,
-                            elapsed=window_elapsed,
-                            source_time=window_source_time,
-                            resize_time=window_resize_time,
-                            inference_time=window_inference_time,
-                            analysis_time=window_analysis_time,
-                            alignment_time=window_alignment_time,
-                            mask_time=window_mask_time,
-                            bev_time=window_bev_time,
-                            publish_time=window_publish_time,
-                            render_time=window_render_time,
-                            snapshot=output.snapshot,
-                        )
-                        window_started = log_time
-                        window_frames = 0
-                        window_source_time = 0.0
-                        window_resize_time = 0.0
-                        window_inference_time = 0.0
-                        window_analysis_time = 0.0
-                        window_alignment_time = 0.0
-                        window_mask_time = 0.0
-                        window_bev_time = 0.0
-                        window_publish_time = 0.0
-                        window_render_time = 0.0
-                    if should_stop:
+                    # Bước 3: analyzer, callback và renderer vẫn xử lý đúng thứ
+                    # tự frame để frame_index và snapshot không thay đổi nghĩa.
+                    for frame, depth in zip(batch_frames, batch_depths):
+                        output = self._analyzer.process(depth)
+                        analysis_time = output.timings.total_seconds
+
+                        publish_started = time.perf_counter()
+                        if on_snapshot is not None:
+                            on_snapshot(output.snapshot)
+                        if on_output is not None:
+                            on_output(output)
+                        publish_time = time.perf_counter() - publish_started
+                        processed_frames += 1
+
+                        render_time = 0.0
+                        if self._display:
+                            render_started = time.perf_counter()
+                            should_stop = self._show(frame, output, smooth_fps)
+                            render_time = time.perf_counter() - render_started
+
+                        window_frames += 1
+                        window_source_time += source_time / batch_count
+                        window_resize_time += resize_time / batch_count
+                        window_inference_time += inference_time / batch_count
+                        window_analysis_time += analysis_time
+                        window_alignment_time += output.timings.alignment_seconds
+                        window_mask_time += output.timings.mask_seconds
+                        window_bev_time += output.timings.bev_seconds
+                        window_publish_time += publish_time
+                        window_render_time += render_time
+                        log_time = time.perf_counter()
+                        window_elapsed = log_time - window_started
+                        if (
+                            self._log_interval > 0
+                            and window_elapsed >= self._log_interval
+                        ):
+                            self._log_performance(
+                                frames=window_frames,
+                                elapsed=window_elapsed,
+                                source_time=window_source_time,
+                                resize_time=window_resize_time,
+                                inference_time=window_inference_time,
+                                analysis_time=window_analysis_time,
+                                alignment_time=window_alignment_time,
+                                mask_time=window_mask_time,
+                                bev_time=window_bev_time,
+                                publish_time=window_publish_time,
+                                render_time=window_render_time,
+                                snapshot=output.snapshot,
+                            )
+                            window_started = log_time
+                            window_frames = 0
+                            window_source_time = 0.0
+                            window_resize_time = 0.0
+                            window_inference_time = 0.0
+                            window_analysis_time = 0.0
+                            window_alignment_time = 0.0
+                            window_mask_time = 0.0
+                            window_bev_time = 0.0
+                            window_publish_time = 0.0
+                            window_render_time = 0.0
+                        if should_stop:
+                            break
+                    if should_stop or source_ended:
                         break
         finally:
             if self._display:

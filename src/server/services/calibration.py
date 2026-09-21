@@ -11,7 +11,7 @@ from typing import Callable
 import numpy as np
 
 from server.models.calibration import CalibrationRunResponse
-from server.services.config_store import ConfigStore
+from server.services.config_store import CameraNotFoundError, ConfigStore
 from server.services.worker_resources import release_worker_memory
 from server.settings import ServerSettings
 from utils.logger import LOGGER
@@ -19,7 +19,6 @@ from walkway_monitor.calibration.pipeline import CalibrationPipeline
 from walkway_monitor.calibration.storage import (
     artifact_path_for_id,
     delete_artifacts_for_id,
-    legacy_artifact_path_for_id,
 )
 from walkway_monitor.config import (
     CalibrationConfig as PipelineCalibrationConfig,
@@ -84,11 +83,12 @@ class CalibrationService:
         """Khởi động calibration headless và trả trạng thái ban đầu."""
         # Bước 1: sao chép cấu hình trước khi chiếm slot worker.
         baseline = self.config_store.get_baseline(baseline_id)
-        camera = self.config_store.get_current_camera()
-        if camera is None or camera.id != baseline.camera_id:
+        try:
+            camera = self.config_store.get_camera(baseline.camera_id)
+        except CameraNotFoundError as exc:
             raise CalibrationCameraError(
-                "Baseline không thuộc camera hiện tại; hãy tạo baseline mới."
-            )
+                "Camera của baseline không còn tồn tại; hãy tạo baseline mới."
+            ) from exc
         with self._lock:
             # Bước 2: MVP chỉ cho một model calibration chạy để tránh tranh GPU.
             if self._thread is not None and self._thread.is_alive():
@@ -127,10 +127,7 @@ class CalibrationService:
                 return self._to_response(state)
 
         # Bước 1: sau restart, file NPZ hoàn chỉnh là bằng chứng calibration xong.
-        # Vẫn nhận cấu trúc phẳng cũ để các artifact đã tạo không bị mất hiệu lực.
-        artifact_exists = self._artifact_path(baseline_id).is_file() or (
-            self._legacy_artifact_path(baseline_id).is_file()
-        )
+        artifact_exists = self._artifact_path(baseline_id).is_file()
         status = "completed" if artifact_exists else "idle"
         return CalibrationRunResponse(
             baseline_id=baseline_id,
@@ -164,7 +161,7 @@ class CalibrationService:
                     "Không thể xóa baseline đang được calibration."
                 )
 
-            # Bước 2: dọn cả cấu trúc thư mục mới và các file phẳng cũ.
+            # Bước 2: dọn thư mục artifact của baseline đã chọn.
             return delete_artifacts_for_id(
                 self.settings.baselines_directory,
                 baseline_id,
@@ -183,12 +180,10 @@ class CalibrationService:
         if suffix is None:
             raise ValueError(f"Loại ảnh artifact không được hỗ trợ: {image_type}")
 
-        # Bước 2: ưu tiên cấu trúc thư mục chuẩn, sau đó thử file phẳng cũ.
-        canonical_image = self._artifact_path(baseline_id).with_suffix(suffix)
-        legacy_image = self._legacy_artifact_path(baseline_id).with_suffix(suffix)
-        for image_path in (canonical_image, legacy_image):
-            if image_path.is_file():
-                return image_path
+        # Bước 2: chỉ dùng ảnh trong thư mục artifact chuẩn của baseline.
+        image_path = self._artifact_path(baseline_id).with_suffix(suffix)
+        if image_path.is_file():
+            return image_path
         raise CalibrationArtifactNotFoundError(
             f"Baseline '{baseline_id}' chưa có ảnh {image_type}."
         )
@@ -288,16 +283,6 @@ class CalibrationService:
         """Tạo đường dẫn NPZ trong thư mục riêng của một baseline."""
         # Bước 1: dùng helper chung để mọi consumer tuân theo cùng layout.
         return artifact_path_for_id(
-            self.settings.baselines_directory,
-            baseline_id,
-        )
-
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _legacy_artifact_path(self, baseline_id: str) -> Path:
-        """Tạo đường dẫn NPZ phẳng cũ để giữ tương thích khi đọc trạng thái."""
-        # Bước 1: chỉ dùng helper này để nhận diện dữ liệu trước nâng cấp.
-        return legacy_artifact_path_for_id(
             self.settings.baselines_directory,
             baseline_id,
         )

@@ -1,5 +1,7 @@
 """Kiểm thử worker calibration headless và artifact theo baseline ID."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -31,6 +33,13 @@ class FakeEstimator:
             height,
             width,
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def predict_batch(self, frames: list[np.ndarray]) -> list[np.ndarray]:
+        """Trả depth map tương ứng cho toàn bộ frame kiểm thử."""
+        # Bước 1: giữ cùng thuật toán gradient cho từng frame trong batch.
+        return [self.predict(frame) for frame in frames]
 
 
 class FakeMediaSources:
@@ -72,8 +81,11 @@ class CalibrationServiceTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = ConfigStore(root / "config.json")
+            store.create_camera(
+                CameraCreate(name="Camera 1", source="rtsp://camera-1.local/stream")
+            )
             camera = store.create_camera(
-                CameraCreate(name="Camera", source="rtsp://camera.local/stream")
+                CameraCreate(name="Camera 2", source="rtsp://camera-2.local/stream")
             )
             baseline = store.create_baseline(
                 camera.id,
@@ -144,8 +156,8 @@ class CalibrationServiceTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def test_recognizes_legacy_flat_artifact_after_restart(self) -> None:
-        """Service vẫn nhận artifact phẳng cũ là một calibration hoàn tất."""
+    def test_ignores_flat_artifact_outside_baseline_directory(self) -> None:
+        """Service chỉ công nhận artifact trong thư mục chuẩn của baseline."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = ConfigStore(root / "config.json")
@@ -176,8 +188,8 @@ class CalibrationServiceTestCase(unittest.TestCase):
 
             result = service.status(baseline.id)
 
-            self.assertEqual(result.status, "completed")
-            self.assertTrue(result.artifact_available)
+            self.assertEqual(result.status, "idle")
+            self.assertFalse(result.artifact_available)
 
 
 if __name__ == "__main__":

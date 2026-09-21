@@ -1,17 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import {
   ActivityIcon,
   CameraIcon,
   CircleStopIcon,
   Clock3Icon,
-  GaugeIcon,
   LoaderCircleIcon,
-  MapPinIcon,
   PlayIcon,
-  RulerIcon,
   SettingsIcon,
   TriangleAlertIcon,
   WifiIcon,
@@ -31,8 +28,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
 import type { CameraIdentity } from "@/lib/types/camera"
+import { mapRuntimeProcessStatus } from "@/lib/server/runtime"
 import type { RuntimeProcessStatus } from "@/lib/types/runtime"
 
 import { startRuntime, stopRuntime } from "./actions"
@@ -46,6 +43,16 @@ type ActiveBaseline = {
   roiPoints: [number, number][]
 }
 
+type OverviewSource = {
+  camera: CameraIdentity
+  baseline: ActiveBaseline
+}
+
+type DifferenceZone = {
+  polygon: [number, number][]
+  areaRatio: number
+}
+
 type CorridorData = {
   maximumPassableWidthMeters: number
   walkwayWidthMeters: number
@@ -54,11 +61,6 @@ type CorridorData = {
   frameIndex: number
   capturedAt: number
   differenceZones: DifferenceZone[]
-}
-
-type DifferenceZone = {
-  polygon: [number, number][]
-  areaRatio: number
 }
 
 type CorridorReading = {
@@ -90,11 +92,20 @@ function processBadgeVariant(
   return "secondary"
 }
 
+function readingBadgeVariant(
+  reading: CorridorReading
+): "default" | "secondary" | "destructive" | "outline" {
+  if (reading.status === "ok") return "default"
+  if (reading.status === "error") return "destructive"
+  if (reading.status === "stale") return "outline"
+  return "secondary"
+}
+
 function readingStatusLabel(reading: CorridorReading): string {
   if (reading.status === "ok") return "Dữ liệu mới"
-  if (reading.status === "warming_up") return "Đang chờ kết quả"
-  if (reading.status === "stale") return "Dữ liệu đã cũ"
-  return "Lỗi dữ liệu"
+  if (reading.status === "warming_up") return "Đang chờ"
+  if (reading.status === "stale") return "Dữ liệu cũ"
+  return "Có lỗi"
 }
 
 function formatMeters(value: number | undefined): string {
@@ -105,18 +116,6 @@ function formatAge(ageMs: number | undefined): string {
   if (ageMs === undefined) return "Chưa có dữ liệu"
   if (ageMs < 1000) return `${ageMs} ms trước`
   return `${(ageMs / 1000).toFixed(1)} giây trước`
-}
-
-function isRuntimeProcessStatus(value: unknown): value is RuntimeProcessStatus {
-  if (typeof value !== "object" || value === null) return false
-  const status = (value as Record<string, unknown>).status
-  return (
-    status === "stopped" ||
-    status === "starting" ||
-    status === "running" ||
-    status === "stopping" ||
-    status === "failed"
-  )
 }
 
 function parseCorridorReading(value: unknown): CorridorReading | undefined {
@@ -163,9 +162,7 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
   }
   const differenceZones: DifferenceZone[] = []
   for (const zone of changedZones) {
-    if (typeof zone !== "object" || zone === null) {
-      return { status, ageMs, error }
-    }
+    if (typeof zone !== "object" || zone === null) return { status, ageMs, error }
     const zonePayload = zone as Record<string, unknown>
     const polygon = zonePayload.polygon
     if (
@@ -208,29 +205,177 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
   }
 }
 
+function parseOverviewReadings(
+  value: unknown
+): Record<string, CorridorReading> | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const payload = value as Record<string, unknown>
+  if (payload.type !== "overview_info" || !Array.isArray(payload.items)) {
+    return undefined
+  }
+  const readings: Record<string, CorridorReading> = {}
+  for (const item of payload.items) {
+    if (typeof item !== "object" || item === null) return undefined
+    const baselineId = (item as Record<string, unknown>).baseline_id
+    const reading = parseCorridorReading(item)
+    if (typeof baselineId !== "string" || !reading) return undefined
+    readings[baselineId] = reading
+  }
+  return readings
+}
+
 function overviewWebSocketUrl(): string {
   const configuredUrl = process.env.NEXT_PUBLIC_SERVER_WS_URL?.replace(/\/$/, "")
   if (configuredUrl) {
     const baseUrl = configuredUrl.replace(/\/ws\/(corridor|overview)$/, "")
     return `${baseUrl}/ws/overview`
   }
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, "")
+  if (backendUrl) {
+    const baseUrl = backendUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:")
+    return `${baseUrl}/ws/overview`
+  }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
   return `${protocol}//${window.location.host}/ws/overview`
 }
 
+function CameraResultCard({
+  source,
+  reading,
+  streamActive,
+}: {
+  source: OverviewSource
+  reading: CorridorReading
+  streamActive: boolean
+}) {
+  const zones =
+    streamActive && reading.status === "ok"
+      ? reading.data?.differenceZones ?? []
+      : []
+  const polygon = source.baseline.roiPoints
+
+  return (
+    <Card size="sm">
+      <CardHeader className="border-b">
+        <CardTitle>{source.camera.name}</CardTitle>
+        <CardDescription>{source.baseline.name}</CardDescription>
+        <CardAction>
+          <Badge variant={readingBadgeVariant(reading)}>
+            {reading.status === "warming_up" ? (
+              <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+            ) : reading.status === "error" ? (
+              <TriangleAlertIcon data-icon="inline-start" />
+            ) : (
+              <ActivityIcon data-icon="inline-start" />
+            )}
+            {readingStatusLabel(reading)}
+          </Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <div className="relative">
+          <LiveCameraPlayer
+            cameraId={source.camera.id}
+            cameraName={source.camera.name}
+            className="min-h-48"
+          />
+          {polygon.length >= 3 || zones.length ? (
+            <svg
+              viewBox="0 0 1 1"
+              preserveAspectRatio="none"
+              className="pointer-events-none absolute inset-0 z-20 size-full rounded-xl"
+              aria-label={`${zones.length} vùng sai khác với baseline`}
+            >
+              {polygon.length >= 3 ? (
+                <polygon
+                  points={polygon
+                    .map(([xValue, yValue]) => `${xValue},${yValue}`)
+                    .join(" ")}
+                  className="fill-emerald-500/10 stroke-emerald-400"
+                  strokeDasharray="8 5"
+                  strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null}
+              {zones.map((zone, index) => (
+                <polygon
+                  key={index}
+                  points={zone.polygon
+                    .map(([xValue, yValue]) => `${xValue},${yValue}`)
+                    .join(" ")}
+                  className="fill-destructive/30 stroke-destructive"
+                  strokeWidth={2}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </svg>
+          ) : null}
+          {zones.length ? (
+            <Badge
+              variant="destructive"
+              className="pointer-events-none absolute right-3 top-3 z-30"
+            >
+              {zones.length} vùng sai khác
+            </Badge>
+          ) : null}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-lg border p-2.5">
+            <p className="text-xs text-muted-foreground">Rộng đi qua</p>
+            <p className="font-medium tabular-nums">
+              {formatMeters(reading.data?.maximumPassableWidthMeters)}
+            </p>
+          </div>
+          <div className="rounded-lg border p-2.5">
+            <p className="text-xs text-muted-foreground">Hành lang</p>
+            <p className="font-medium tabular-nums">
+              {formatMeters(reading.data?.walkwayWidthMeters)}
+            </p>
+          </div>
+          <div className="rounded-lg border p-2.5">
+            <p className="text-xs text-muted-foreground">Nút thắt Y</p>
+            <p className="font-medium tabular-nums">
+              {formatMeters(reading.data?.bottleneckYMeters)}
+            </p>
+          </div>
+        </div>
+
+        {reading.data?.freeXRangesMeters.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {reading.data.freeXRangesMeters.map(([start, end], index) => (
+              <Badge key={`${start}-${end}-${index}`} variant="secondary">
+                X: {start.toFixed(2)} → {end.toFixed(2)} m
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+
+        {reading.error ? (
+          <Alert variant="destructive">
+            <TriangleAlertIcon />
+            <AlertTitle>Không đọc được kết quả</AlertTitle>
+            <AlertDescription>{reading.error}</AlertDescription>
+          </Alert>
+        ) : null}
+      </CardContent>
+      <CardFooter className="justify-between border-t text-xs text-muted-foreground">
+        <span>Frame {reading.data?.frameIndex ?? "—"}</span>
+        <span>{formatAge(reading.ageMs)}</span>
+      </CardFooter>
+    </Card>
+  )
+}
+
 export function OverviewDashboard({
-  camera,
-  activeBaseline,
+  sources,
   initialProcessStatus,
 }: {
-  camera?: CameraIdentity
-  activeBaseline?: ActiveBaseline
+  sources: OverviewSource[]
   initialProcessStatus: RuntimeProcessStatus
 }) {
   const [processStatus, setProcessStatus] = useState(initialProcessStatus)
-  const [reading, setReading] = useState<CorridorReading>({
-    status: "warming_up",
-  })
+  const [readings, setReadings] = useState<Record<string, CorridorReading>>({})
   const [connection, setConnection] = useState<ConnectionState>("closed")
   const [pending, startTransition] = useTransition()
   const processActive =
@@ -238,18 +383,10 @@ export function OverviewDashboard({
     processStatus.status === "running" ||
     processStatus.status === "stopping"
   const shouldStream = processActive
-  const displayedConnection = shouldStream ? connection : "closed"
-  const visibleZones =
-    shouldStream && connection === "open" && reading.status === "ok"
-      ? reading.data?.differenceZones ?? []
-      : []
-  const walkwayPolygon = activeBaseline?.roiPoints ?? []
-  const canStart = Boolean(camera && activeBaseline?.ready)
+  const canStart =
+    sources.length > 0 && sources.every((source) => source.baseline.ready)
   const controlDisabled = pending || processStatus.status === "stopping"
-  const lastCapture = useMemo(() => {
-    if (!reading.data) return "Chưa có"
-    return new Date(reading.data.capturedAt * 1000).toLocaleTimeString("vi-VN")
-  }, [reading.data])
+  const sourceKey = sources.map((source) => source.baseline.id).join("|")
 
   function handleRuntimeControl() {
     startTransition(async () => {
@@ -269,29 +406,22 @@ export function OverviewDashboard({
       if (document.hidden || requestInFlight) return
       requestInFlight = true
       try {
-        const response = await fetch("/api/runtime/status", {
-          cache: "no-store",
-        })
+        const response = await fetch("/api/runtime/status", { cache: "no-store" })
         if (!response.ok) return
         const status: unknown = await response.json()
-        if (isRuntimeProcessStatus(status)) setProcessStatus(status)
+        const mappedStatus = mapRuntimeProcessStatus(status)
+        if (mappedStatus) setProcessStatus(mappedStatus)
       } finally {
         requestInFlight = false
       }
     }
-    const handleVisibilityChange = () => {
-      if (!document.hidden) void refresh()
-    }
     const timer = window.setInterval(refresh, 2500)
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-    }
+    return () => window.clearInterval(timer)
   }, [])
 
   useEffect(() => {
     if (!shouldStream) {
+      setConnection("closed")
       return
     }
 
@@ -301,23 +431,21 @@ export function OverviewDashboard({
     let reconnectTimer: number | undefined
     let requestInFlight = false
 
-    function scheduleSnapshotRequest(delay = OVERVIEW_REFRESH_INTERVAL_MS) {
+    function scheduleRequest(delay = OVERVIEW_REFRESH_INTERVAL_MS) {
       if (cancelled || document.hidden) return
       if (requestTimer !== undefined) window.clearTimeout(requestTimer)
-      requestTimer = window.setTimeout(() => {
-        requestTimer = undefined
-        requestSnapshot()
-      }, delay)
+      requestTimer = window.setTimeout(requestSnapshot, delay)
     }
 
     function requestSnapshot() {
+      requestTimer = undefined
       if (cancelled || document.hidden) return
       if (
         socket?.readyState !== WebSocket.OPEN ||
         socket.bufferedAmount > 0 ||
         requestInFlight
       ) {
-        scheduleSnapshotRequest()
+        scheduleRequest()
         return
       }
       requestInFlight = true
@@ -334,20 +462,27 @@ export function OverviewDashboard({
       setConnection("connecting")
       socket = new WebSocket(overviewWebSocketUrl())
       socket.onopen = () => {
-        if (cancelled || !socket) return
+        if (cancelled) return
         setConnection("open")
-        setReading({ status: "warming_up" })
+        setReadings(
+          Object.fromEntries(
+            sources.map((source) => [
+              source.baseline.id,
+              { status: "warming_up" } satisfies CorridorReading,
+            ])
+          )
+        )
         requestSnapshot()
       }
       socket.onmessage = (event) => {
         requestInFlight = false
         try {
-          const parsed = parseCorridorReading(JSON.parse(String(event.data)))
-          if (parsed) setReading(parsed)
+          const parsed = parseOverviewReadings(JSON.parse(String(event.data)))
+          if (parsed) setReadings(parsed)
         } catch {
-          setReading({ status: "error", error: "WebSocket trả JSON không hợp lệ." })
+          toast.error("WebSocket Overview trả dữ liệu không hợp lệ.")
         }
-        scheduleSnapshotRequest()
+        scheduleRequest()
       }
       socket.onerror = () => setConnection("error")
       socket.onclose = () => {
@@ -363,9 +498,9 @@ export function OverviewDashboard({
       if (document.hidden) {
         if (requestTimer !== undefined) window.clearTimeout(requestTimer)
         requestTimer = undefined
-        return
+      } else if (!requestInFlight) {
+        scheduleRequest(0)
       }
-      if (!requestInFlight) scheduleSnapshotRequest(0)
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange)
@@ -377,307 +512,119 @@ export function OverviewDashboard({
       document.removeEventListener("visibilitychange", handleVisibilityChange)
       socket?.close()
     }
-  }, [shouldStream])
-
-  const metricCards = [
-    {
-      label: "Bề rộng đi qua tối đa",
-      value: formatMeters(reading.data?.maximumPassableWidthMeters),
-      description: "Khoảng trống hẹp nhất còn có thể đi xuyên suốt",
-      icon: RulerIcon,
-    },
-    {
-      label: "Bề rộng hành lang",
-      value: formatMeters(reading.data?.walkwayWidthMeters),
-      description: "Chiều rộng ROI theo tọa độ calibration",
-      icon: GaugeIcon,
-    },
-    {
-      label: "Vị trí nút thắt",
-      value: formatMeters(reading.data?.bottleneckYMeters),
-      description: "Khoảng cách Y từ gốc calibration đến nút thắt",
-      icon: MapPinIcon,
-    },
-  ]
+  }, [shouldStream, sourceKey])
 
   return (
-    <div className="flex flex-1 flex-col gap-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mx-auto flex w-full max-w-[100rem] flex-1 flex-col gap-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Tổng quan</h1>
           <p className="text-muted-foreground">
-            Xem camera, điều khiển runtime và theo dõi kết quả mới nhất.
+            Theo dõi đồng thời {sources.length} camera trong runtime.
           </p>
         </div>
-        <Badge variant={processBadgeVariant(processStatus.status)}>
-          {processStatus.status === "starting" ||
-          processStatus.status === "stopping" ? (
-            <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
-          ) : processStatus.status === "failed" ? (
-            <TriangleAlertIcon data-icon="inline-start" />
-          ) : (
-            <ActivityIcon data-icon="inline-start" />
-          )}
-          {processStatusLabel(processStatus.status)}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={connection === "open" ? "default" : "outline"}>
+            <WifiIcon data-icon="inline-start" />
+            {connection === "open"
+              ? "WebSocket"
+              : connection === "connecting"
+                ? "Đang kết nối"
+                : "Chưa kết nối"}
+          </Badge>
+          <Badge variant={processBadgeVariant(processStatus.status)}>
+            {processStatus.status === "starting" ||
+            processStatus.status === "stopping" ? (
+              <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+            ) : processStatus.status === "failed" ? (
+              <TriangleAlertIcon data-icon="inline-start" />
+            ) : (
+              <ActivityIcon data-icon="inline-start" />
+            )}
+            {processStatusLabel(processStatus.status)}
+          </Badge>
+          <Button
+            onClick={handleRuntimeControl}
+            disabled={controlDisabled || (!processActive && !canStart)}
+            variant={processActive ? "destructive" : "default"}
+          >
+            {pending || processStatus.status === "stopping" ? (
+              <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+            ) : processActive ? (
+              <CircleStopIcon data-icon="inline-start" />
+            ) : (
+              <PlayIcon data-icon="inline-start" />
+            )}
+            {processActive ? "Dừng" : "Bắt đầu"}
+          </Button>
+        </div>
       </div>
 
-      {!camera ? (
-        <Alert variant="destructive">
-          <CameraIcon />
-          <AlertTitle>Chưa có camera</AlertTitle>
-          <AlertDescription>
-            Hãy lưu camera trước khi bắt đầu theo dõi.
-          </AlertDescription>
-        </Alert>
-      ) : !activeBaseline ? (
+      {sources.length === 0 ? (
         <Alert>
           <SettingsIcon />
-          <AlertTitle>Chưa chọn baseline runtime</AlertTitle>
+          <AlertTitle>Chưa có camera trong runtime</AlertTitle>
           <AlertDescription>
-            Chọn một baseline hoàn tất trong trang Cài đặt trước khi chạy.
+            Chọn camera và baseline tại trang Cài đặt trước khi bắt đầu.
           </AlertDescription>
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={<Link href="/settings" />}
+            className="col-start-2 mt-2 justify-self-start"
+          >
+            <SettingsIcon data-icon="inline-start" />
+            Mở cài đặt
+          </Button>
         </Alert>
-      ) : !activeBaseline.ready ? (
+      ) : sources.some((source) => !source.baseline.ready) ? (
         <Alert variant="destructive">
           <TriangleAlertIcon />
-          <AlertTitle>Baseline chưa sẵn sàng</AlertTitle>
+          <AlertTitle>Có baseline chưa sẵn sàng</AlertTitle>
           <AlertDescription>
-            Baseline đang chọn chưa có artifact hoàn chỉnh.
+            Hoàn tất calibration cho mọi camera trước khi chạy runtime.
           </AlertDescription>
         </Alert>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.55fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle>{camera?.name ?? "Video theo dõi"}</CardTitle>
-            <CardDescription>
-              Luồng trực tiếp từ camera hiện tại qua MediaMTX.
-            </CardDescription>
-            <CardAction>
-              <Badge variant="outline">
-                <CameraIcon data-icon="inline-start" />
-                WebRTC
-              </Badge>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <div className="relative">
-              <LiveCameraPlayer
-                cameraId={camera?.id}
-                cameraName={camera?.name}
-                emptyMessage="Hãy cấu hình camera để xem video trực tiếp"
-              />
-              {walkwayPolygon.length >= 3 || visibleZones.length ? (
-                <svg
-                  viewBox="0 0 1 1"
-                  preserveAspectRatio="none"
-                  className="pointer-events-none absolute inset-0 z-20 size-full rounded-xl"
-                  aria-label={`Polygon lối đi và ${visibleZones.length} vùng sai khác với baseline`}
-                >
-                  {walkwayPolygon.length >= 3 ? (
-                    <polygon
-                      points={walkwayPolygon
-                        .map(([xValue, yValue]) => `${xValue},${yValue}`)
-                        .join(" ")}
-                      className="fill-emerald-500/10 stroke-emerald-400"
-                      strokeDasharray="8 5"
-                      strokeWidth={2}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  ) : null}
-                  {visibleZones.map((zone, index) => (
-                    <polygon
-                      key={index}
-                      points={zone.polygon
-                        .map(([xValue, yValue]) => `${xValue},${yValue}`)
-                        .join(" ")}
-                      className="fill-destructive/30 stroke-destructive"
-                      strokeWidth={2}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  ))}
-                </svg>
-              ) : null}
-              {walkwayPolygon.length >= 3 ? (
-                <div className="pointer-events-none absolute right-3 top-3 z-30 flex gap-2">
-                  <Badge variant="secondary">Viền xanh · vùng lối đi</Badge>
-                  {visibleZones.length ? (
-                    <Badge variant="destructive">Màu đỏ · sai khác</Badge>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
+      {processStatus.error ? (
+        <Alert variant="destructive">
+          <TriangleAlertIcon />
+          <AlertTitle>Runtime gặp lỗi</AlertTitle>
+          <AlertDescription>{processStatus.error}</AlertDescription>
+        </Alert>
+      ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Điều khiển theo dõi</CardTitle>
-            <CardDescription>
-              Runtime chạy trong worker nền độc lập với FastAPI.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-5">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Trạng thái</p>
-                <p className="font-medium">
-                  {processStatusLabel(processStatus.status)}
-                </p>
-              </div>
-              <Badge variant={processBadgeVariant(processStatus.status)}>
-                {processStatus.status}
-              </Badge>
-            </div>
-            <Separator />
-            <div>
-              <p className="text-sm text-muted-foreground">Baseline</p>
-              <p className="font-medium">
-                {activeBaseline?.name ?? "Chưa cấu hình"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Phiên bắt đầu</p>
-              <p className="font-medium">
-                {processStatus.startedAt
-                  ? new Date(processStatus.startedAt).toLocaleString("vi-VN")
-                  : "Chưa chạy"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Snapshot gần nhất</p>
-              <p className="font-medium">
-                {formatAge(reading.ageMs ?? processStatus.snapshotAgeMs)}
-              </p>
-            </div>
-            {processStatus.error ? (
-              <Alert variant="destructive">
-                <TriangleAlertIcon />
-                <AlertTitle>Runtime gặp lỗi</AlertTitle>
-                <AlertDescription>{processStatus.error}</AlertDescription>
-              </Alert>
-            ) : null}
-          </CardContent>
-          <CardFooter className="mt-auto flex-col items-stretch gap-3 border-t">
-            <Button
-              onClick={handleRuntimeControl}
-              disabled={controlDisabled || (!processActive && !canStart)}
-              variant={processActive ? "destructive" : "default"}
-            >
-              {pending || processStatus.status === "stopping" ? (
-                <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
-              ) : processActive ? (
-                <CircleStopIcon data-icon="inline-start" />
-              ) : (
-                <PlayIcon data-icon="inline-start" />
-              )}
-              {pending
-                ? "Đang gửi lệnh..."
-                : processStatus.status === "stopping"
-                  ? "Đang cleanup..."
-                  : processActive
-                    ? "Dừng theo dõi"
-                    : "Bắt đầu theo dõi"}
-            </Button>
-            {!canStart && !processActive ? (
-              <Button variant="outline" render={<Link href="/settings" />}>
-                <SettingsIcon data-icon="inline-start" />
-                Mở cài đặt runtime
-              </Button>
-            ) : null}
-          </CardFooter>
-        </Card>
-      </div>
-
-      <section className="grid gap-4" aria-labelledby="latest-results-title">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 id="latest-results-title" className="text-xl font-semibold tracking-tight">
-              Kết quả mới nhất
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Các phép đo được cập nhật khoảng 10 lần mỗi giây từ worker runtime.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant={displayedConnection === "open" ? "default" : "outline"}>
-              <WifiIcon data-icon="inline-start" />
-              {displayedConnection === "open"
-                ? "WebSocket đã kết nối"
-                : displayedConnection === "connecting"
-                  ? "Đang kết nối"
-                  : "WebSocket chưa kết nối"}
-            </Badge>
-            <Badge variant={reading.status === "error" ? "destructive" : "secondary"}>
-              <Clock3Icon data-icon="inline-start" />
-              {readingStatusLabel(reading)}
-            </Badge>
-            <Badge variant="outline">{visibleZones.length} vùng sai khác</Badge>
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          {metricCards.map((metric) => (
-            <Card key={metric.label} size="sm">
-              <CardHeader>
-                <CardDescription>{metric.label}</CardDescription>
-                <CardAction>
-                  <metric.icon className="size-4 text-muted-foreground" />
-                </CardAction>
-                <CardTitle className="text-2xl">{metric.value}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">
-                  {metric.description}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Chi tiết nút thắt</CardTitle>
-            <CardDescription>
-              Các khoảng X còn trống tại vị trí hẹp nhất của hành lang.
-            </CardDescription>
-            <CardAction>
-              <Badge variant="outline">Frame {reading.data?.frameIndex ?? "—"}</Badge>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            {reading.data?.freeXRangesMeters.length ? (
-              <div className="flex flex-wrap gap-2">
-                {reading.data.freeXRangesMeters.map(([start, end], index) => (
-                  <Badge key={`${start}-${end}-${index}`} variant="secondary">
-                    {start.toFixed(2)} m → {end.toFixed(2)} m
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {processActive
-                  ? "Đang chờ worker công bố kết quả đầu tiên."
-                  : "Bắt đầu theo dõi để nhận kết quả phân tích."}
-              </p>
-            )}
-          </CardContent>
-          <CardFooter className="justify-between border-t text-sm text-muted-foreground">
-            <span>Cập nhật lúc {lastCapture}</span>
-            <span>{formatAge(reading.ageMs)}</span>
-          </CardFooter>
-        </Card>
-
-        {reading.error ? (
-          <Alert variant="destructive">
-            <TriangleAlertIcon />
-            <AlertTitle>Không đọc được kết quả</AlertTitle>
-            <AlertDescription>{reading.error}</AlertDescription>
-          </Alert>
-        ) : null}
+      <section
+        className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3"
+        aria-label="Kết quả camera runtime"
+      >
+        {sources.map((source) => (
+          <CameraResultCard
+            key={source.baseline.id}
+            source={source}
+            reading={
+              readings[source.baseline.id] ?? { status: "warming_up" }
+            }
+            streamActive={shouldStream && connection === "open"}
+          />
+        ))}
       </section>
+
+      {sources.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+          <span>
+            <CameraIcon className="mr-1.5 inline size-4" />
+            {sources.length} camera · {sources.length} baseline
+          </span>
+          <span>
+            <Clock3Icon className="mr-1.5 inline size-4" />
+            Phiên bắt đầu: {processStatus.startedAt
+              ? new Date(processStatus.startedAt).toLocaleString("vi-VN")
+              : "Chưa chạy"}
+          </span>
+        </div>
+      ) : null}
     </div>
   )
 }

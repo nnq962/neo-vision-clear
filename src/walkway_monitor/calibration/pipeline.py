@@ -19,7 +19,7 @@ from walkway_monitor.calibration.roi_selector import (
 )
 from walkway_monitor.calibration.storage import save_baseline
 from walkway_monitor.config import CalibrationConfig
-from walkway_monitor.depth.estimator import DepthEstimator
+from walkway_monitor.depth.estimator import DepthEstimator, predict_depth_batch
 from walkway_monitor.models import BaselineArtifact, RoiDefinition
 from walkway_monitor.ui import draw_text
 from walkway_monitor.ui.detection_view import colorize_depth
@@ -28,11 +28,19 @@ from walkway_monitor.ui.detection_view import colorize_depth
 class CalibrationPipeline:
     """Pipeline tạo baseline từ một nguồn RTSP hoặc video file."""
 
-    def __init__(self, estimator: DepthEstimator, config: CalibrationConfig):
+    def __init__(
+        self,
+        estimator: DepthEstimator,
+        config: CalibrationConfig,
+        batch_size: int = 1,
+    ):
         """Lưu estimator và kiểm tra cấu hình calibration."""
         config.validate()
+        if batch_size < 1:
+            raise ValueError("batch_size phải lớn hơn hoặc bằng 1.")
         self._estimator = estimator
         self._config = config
+        self._batch_size = batch_size
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -128,43 +136,55 @@ class CalibrationPipeline:
         stop_event: Event | None,
         on_progress: Callable[[int, int], None] | None,
     ) -> list[np.ndarray]:
-        """Thu đúng số frame cấu hình và suy luận depth map cho từng frame."""
+        """Thu đúng số frame cấu hình và suy luận theo từng batch."""
         depths: list[np.ndarray] = []
         window = "Dang thu baseline"
         while len(depths) < self._config.frame_count:
-            # Bước 1: cho phép service dừng công việc khi server shutdown.
-            if stop_event is not None and stop_event.is_set():
-                raise InterruptedError("Calibration đã được yêu cầu dừng.")
-            frame, _meta = self._read_one(media)
-            frame = resize_frame(frame, self._config.process_width)
-            if frame.shape[:2] != expected_shape:
-                raise RuntimeError(
-                    "Độ phân giải nguồn thay đổi trong lúc calibration: "
-                    f"{frame.shape[:2]} != {expected_shape}."
-                )
-            depth = self._estimator.predict(frame)
-            depths.append(depth)
-            if on_progress is not None:
-                on_progress(len(depths), self._config.frame_count)
-            LOGGER.info(
-                "Đã xử lý baseline frame %d/%d",
-                len(depths),
-                self._config.frame_count,
+            # Bước 1: thu đủ batch hoặc phần còn lại của frame_count.
+            batch_count = min(
+                self._batch_size,
+                self._config.frame_count - len(depths),
             )
-            # Bước 2: preview tương tác chỉ dành cho lệnh CLI chạy có display.
-            if display:
-                preview = draw_roi(frame, roi)
-                preview = draw_text(
-                    preview,
-                    f"BASELINE {len(depths)}/{self._config.frame_count} – Q: hủy",
-                    (15, 8),
-                    font_size=23,
-                    color=(0, 255, 255),
+            frames: list[np.ndarray] = []
+            for _index in range(batch_count):
+                if stop_event is not None and stop_event.is_set():
+                    raise InterruptedError("Calibration đã được yêu cầu dừng.")
+                frame, _meta = self._read_one(media)
+                frame = resize_frame(frame, self._config.process_width)
+                if frame.shape[:2] != expected_shape:
+                    raise RuntimeError(
+                        "Độ phân giải nguồn thay đổi trong lúc calibration: "
+                        f"{frame.shape[:2]} != {expected_shape}."
+                    )
+                frames.append(frame)
+
+            # Bước 2: estimator forward cả batch trong một lời gọi.
+            batch_depths = predict_depth_batch(self._estimator, frames)
+            for frame, depth in zip(frames, batch_depths):
+                depths.append(depth)
+                if on_progress is not None:
+                    on_progress(len(depths), self._config.frame_count)
+                LOGGER.info(
+                    "Đã xử lý baseline frame %d/%d | batch=%d",
+                    len(depths),
+                    self._config.frame_count,
+                    len(frames),
                 )
-                cv2.imshow(window, preview)
-                key = cv2.waitKey(1) & 0xFF
-                if key in (27, ord("q"), ord("Q")):
-                    raise KeyboardInterrupt("Đã hủy khi đang thu baseline.")
+
+                # Bước 3: preview tương tác vẫn hiển thị từng kết quả theo thứ tự.
+                if display:
+                    preview = draw_roi(frame, roi)
+                    preview = draw_text(
+                        preview,
+                        f"BASELINE {len(depths)}/{self._config.frame_count} – Q: hủy",
+                        (15, 8),
+                        font_size=23,
+                        color=(0, 255, 255),
+                    )
+                    cv2.imshow(window, preview)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key in (27, ord("q"), ord("Q")):
+                        raise KeyboardInterrupt("Đã hủy khi đang thu baseline.")
         if display:
             cv2.destroyWindow(window)
         return depths

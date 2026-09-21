@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import threading
-from typing import Callable, Literal
+from typing import Callable, Literal, Sequence
 
 from server.models.calibration import CalibrationConfig
 from server.models.camera import CameraConfig
@@ -16,18 +16,17 @@ from server.settings import ServerSettings
 from utils.logger import LOGGER
 from walkway_monitor.calibration.storage import (
     artifact_path_for_id,
-    legacy_artifact_path_for_id,
     load_baseline,
 )
 from walkway_monitor.config import default_checkpoint_path
 from walkway_monitor.depth.estimator import DepthAnythingEstimator, DepthEstimator
 from walkway_monitor.detection.models import DetectionOutput
-from walkway_monitor.detection.pipeline import DetectionPipeline
+from walkway_monitor.detection.camera_batch_pipeline import CameraBatchDetectionPipeline
 from walkway_monitor.detection.zones import extract_difference_zones
 
 
 EstimatorFactory = Callable[..., DepthEstimator]
-PipelineFactory = Callable[..., DetectionPipeline]
+PipelineFactory = Callable[..., CameraBatchDetectionPipeline]
 RuntimeState = Literal["stopped", "starting", "running", "stopping", "failed"]
 
 
@@ -48,20 +47,21 @@ class MonitorService:
         self,
         settings: ServerSettings,
         estimator_factory: EstimatorFactory = DepthAnythingEstimator,
-        pipeline_factory: PipelineFactory = DetectionPipeline,
+        pipeline_factory: PipelineFactory = CameraBatchDetectionPipeline,
     ):
         """Lưu dependency và khởi tạo state worker ở trạng thái dừng."""
         settings.validate()
         self.settings = settings
         self.snapshot_store = SnapshotStore()
+        self._snapshot_stores: dict[str, SnapshotStore] = {}
         self._estimator_factory = estimator_factory
         self._pipeline_factory = pipeline_factory
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
-        self._pipeline: DetectionPipeline | None = None
+        self._pipeline: CameraBatchDetectionPipeline | None = None
         self._state: RuntimeState = "stopped"
-        self._active_baseline_id: str | None = None
+        self._active_baseline_ids: list[str] = []
         self._error: str | None = None
         self._started_at: datetime | None = None
         self._snapshot_max_age_seconds = settings.snapshot_max_age_seconds
@@ -70,31 +70,45 @@ class MonitorService:
 
     def start(
         self,
-        camera: CameraConfig,
-        baseline: CalibrationConfig,
+        cameras: Sequence[CameraConfig],
+        baselines: Sequence[CalibrationConfig],
         runtime: RuntimeConfig,
     ) -> RuntimeProcessResponse:
-        """Khởi tạo thread runtime và trả ngay mà không nạp model trong request."""
-        # Bước 1: kiểm tra quan hệ và artifact trước khi chiếm slot worker.
-        if baseline.camera_id != camera.id:
-            raise RuntimeStartError("Baseline không thuộc camera hiện tại.")
-        artifact_path = self._resolve_artifact_path(baseline.id)
+        """Khởi tạo thread runtime cho một hoặc nhiều camera rồi trả ngay."""
+        # Bước 1: runtime luôn nhận danh sách camera và baseline có thứ tự.
+        camera_items = tuple(cameras)
+        baseline_items = tuple(baselines)
+        if not camera_items or len(camera_items) != len(baseline_items):
+            raise RuntimeStartError("Số camera và baseline runtime không khớp.")
+
+        # Bước 2: kiểm tra quan hệ và artifact trước khi chiếm slot worker.
+        artifact_paths = []
+        for camera, baseline in zip(camera_items, baseline_items):
+            if baseline.camera_id != camera.id:
+                raise RuntimeStartError("Baseline không thuộc camera đã chọn.")
+            artifact_paths.append(self._resolve_artifact_path(baseline.id))
 
         with self._lock:
-            # Bước 2: không cho hai worker dùng chung model, camera và GPU.
+            # Bước 3: không cho hai worker dùng chung model, camera và GPU.
             if self._thread is not None and self._thread.is_alive():
                 raise RuntimeBusyError("Runtime đang chạy hoặc đang dừng.")
 
             self.snapshot_store.reset()
+            self._snapshot_stores = {
+                baseline.id: (
+                    self.snapshot_store if index == 0 else SnapshotStore()
+                )
+                for index, baseline in enumerate(baseline_items)
+            }
             self._stop_event.clear()
             self._state = "starting"
-            self._active_baseline_id = baseline.id
+            self._active_baseline_ids = [item.id for item in baseline_items]
             self._error = None
             self._started_at = datetime.now(timezone.utc)
             self._snapshot_max_age_seconds = runtime.snapshot_max_age_seconds
             self._thread = threading.Thread(
                 target=self._run,
-                args=(camera, baseline, runtime, artifact_path),
+                args=(camera_items, baseline_items, runtime, tuple(artifact_paths)),
                 daemon=True,
                 name="walkway-monitor-worker",
             )
@@ -110,9 +124,11 @@ class MonitorService:
             thread = self._thread
             if thread is None or not thread.is_alive():
                 self._state = "stopped"
-                self._active_baseline_id = None
+                self._active_baseline_ids = []
                 self._error = None
-                self.snapshot_store.reset()
+                for store in self._snapshot_stores.values():
+                    store.reset()
+                self._snapshot_stores = {}
                 return self._status_unlocked()
 
             self._stop_event.set()
@@ -143,29 +159,47 @@ class MonitorService:
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def read_overview_snapshots(self) -> list[tuple[str, SnapshotRead]]:
+        """Đọc atomically danh sách snapshot theo thứ tự baseline runtime."""
+        # Bước 1: sao chép tham chiếu dưới lock rồi đọc từng store độc lập.
+        with self._lock:
+            maximum_age_seconds = self._snapshot_max_age_seconds
+            stores = [
+                (baseline_id, self._snapshot_stores.get(baseline_id))
+                for baseline_id in self._active_baseline_ids
+            ]
+        return [
+            (baseline_id, store.read(maximum_age_seconds))
+            for baseline_id, store in stores
+            if store is not None
+        ]
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def _run(
         self,
-        camera: CameraConfig,
-        baseline_config: CalibrationConfig,
+        cameras: Sequence[CameraConfig],
+        baseline_configs: Sequence[CalibrationConfig],
         runtime: RuntimeConfig,
-        artifact_path: Path,
+        artifact_paths: Sequence[Path],
     ) -> None:
-        """Nạp tài nguyên và chạy pipeline, giữ mọi exception trong worker."""
+        """Nạp tài nguyên và chạy cùng một pipeline cho mọi số camera."""
         try:
-            # Bước 1: toàn bộ thao tác nặng được thực hiện ngoài request FastAPI.
-            baseline = load_baseline(artifact_path)
+            # Bước 1: nạp mọi baseline trước khi tạo model dùng chung cho batch.
+            loaded_baselines = [load_baseline(path) for path in artifact_paths]
+            primary_baseline = loaded_baselines[0]
             checkpoint = (
                 self.settings.checkpoint_path
-                or default_checkpoint_path(baseline.encoder)
+                or default_checkpoint_path(primary_baseline.encoder)
             )
             estimator = self._estimator_factory(
                 checkpoint=checkpoint,
-                encoder=baseline.encoder,
-                input_size=baseline.input_size,
+                encoder=primary_baseline.encoder,
+                input_size=primary_baseline.input_size,
             )
             pipeline = self._pipeline_factory(
                 estimator=estimator,
-                baseline=baseline,
+                baselines=loaded_baselines,
                 config=runtime.detection.to_detection_config(),
                 display=False,
                 log_interval=runtime.log_interval_seconds,
@@ -181,13 +215,13 @@ class MonitorService:
             if self._stop_event.is_set():
                 return
 
-            # Bước 2: pipeline hợp tác dừng qua Event và tự đóng MediaSources.
+            # Bước 2: luôn truyền danh sách nguồn, kể cả khi chỉ có một camera.
             pipeline.run(
-                self._camera_stream_url(camera.id),
+                [self._camera_stream_url(camera.id) for camera in cameras],
                 stop_event=self._stop_event,
                 on_output=self._publish_output,
-                open_timeout_ms=camera.open_timeout_ms,
-                read_timeout_ms=camera.read_timeout_ms,
+                open_timeout_ms=max(camera.open_timeout_ms for camera in cameras),
+                read_timeout_ms=max(camera.read_timeout_ms for camera in cameras),
             )
             with self._lock:
                 if self._stop_event.is_set():
@@ -195,12 +229,13 @@ class MonitorService:
                 else:
                     self._state = "failed"
                     self._error = "Nguồn media đã kết thúc."
-                    self.snapshot_store.set_error(self._error)
+                    for store in self._snapshot_stores.values():
+                        store.set_error(self._error)
         except Exception as exc:
             # Bước 3: lỗi model/camera chỉ làm worker failed, không thoát FastAPI.
             LOGGER.exception(
                 "Runtime với baseline '%s' đã dừng do lỗi.",
-                baseline_config.id,
+                ", ".join(item.id for item in baseline_configs),
             )
             with self._lock:
                 if self._stop_event.is_set():
@@ -208,51 +243,64 @@ class MonitorService:
                 else:
                     self._state = "failed"
                     self._error = str(exc)
-                    self.snapshot_store.set_error(self._error)
+                    for store in self._snapshot_stores.values():
+                        store.set_error(self._error)
         finally:
             # Bước 4: bỏ cả tham chiếu service lẫn local trước khi dọn allocator.
             with self._lock:
                 self._pipeline = None
             pipeline = None
             estimator = None
-            baseline = None
+            loaded_baselines = None
+            primary_baseline = None
             release_worker_memory("runtime")
 
             # Bước 5: chỉ công bố stopped sau khi camera, model và cache đã dọn.
             with self._lock:
                 if self._stop_event.is_set():
                     self._state = "stopped"
-                    self._active_baseline_id = None
-                    self.snapshot_store.reset()
+                    self._active_baseline_ids = []
+                    for store in self._snapshot_stores.values():
+                        store.reset()
+                    self._snapshot_stores = {}
                 self._thread = None
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _publish_output(self, output: DetectionOutput) -> None:
-        """Chuyển mask thành zone gọn nhẹ rồi công bố atomically cùng snapshot."""
-        # Bước 1: giới hạn polygon trước khi đưa vào store dùng chung với WebSocket.
+    def _publish_output(
+        self,
+        camera_index: int,
+        output: DetectionOutput,
+    ) -> None:
+        """Công bố output vào store riêng của camera tương ứng trong batch."""
+        # Bước 1: resolve store theo đúng thứ tự baseline đã truyền vào pipeline.
+        with self._lock:
+            if camera_index >= len(self._active_baseline_ids):
+                return
+            baseline_id = self._active_baseline_ids[camera_index]
+            store = self._snapshot_stores.get(baseline_id)
+        if store is None:
+            return
+
+        # Bước 2: mỗi camera giữ polygon và snapshot mới nhất độc lập.
         zones = extract_difference_zones(
             output.changed_mask,
             maximum_zones=20,
             maximum_vertices=32,
         )
-        self.snapshot_store.publish(output.snapshot, zones)
+        store.publish(output.snapshot, zones)
 
     # ─────────────────────────────────────────────────────────────────────────
 
     def _resolve_artifact_path(self, baseline_id: str) -> Path:
-        """Tìm NPZ theo layout thư mục hiện tại rồi thử layout phẳng cũ."""
-        # Bước 1: ưu tiên artifact chuẩn để mọi baseline được cô lập theo ID.
-        candidates = (
-            artifact_path_for_id(self.settings.baselines_directory, baseline_id),
-            legacy_artifact_path_for_id(
-                self.settings.baselines_directory,
-                baseline_id,
-            ),
+        """Tìm NPZ trong thư mục artifact riêng của baseline."""
+        # Bước 1: chỉ chấp nhận cấu trúc artifact hiện tại.
+        artifact_path = artifact_path_for_id(
+            self.settings.baselines_directory,
+            baseline_id,
         )
-        for candidate in candidates:
-            if candidate.is_file():
-                return candidate
+        if artifact_path.is_file():
+            return artifact_path
         raise RuntimeStartError(
             f"Baseline '{baseline_id}' chưa có artifact hoàn chỉnh."
         )
@@ -272,7 +320,7 @@ class MonitorService:
         reading = self.snapshot_store.read(self._snapshot_max_age_seconds)
         return RuntimeProcessResponse(
             status=self._state,
-            active_baseline_id=self._active_baseline_id,
+            active_baseline_ids=list(self._active_baseline_ids),
             snapshot_age_ms=reading.age_ms,
             error=self._error,
             started_at=self._started_at,

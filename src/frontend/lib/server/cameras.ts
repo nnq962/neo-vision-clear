@@ -25,25 +25,55 @@ function isCameraApiPayload(value: unknown): value is CameraApiPayload {
   )
 }
 
-export async function getCurrentCamera(): Promise<Camera | undefined> {
+function mapCamera(payload: CameraApiPayload): Camera {
+  return {
+    id: payload.id,
+    name: payload.name,
+    source: payload.source,
+    openTimeoutMs: payload.open_timeout_ms,
+    readTimeoutMs: payload.read_timeout_ms,
+  }
+}
+
+export async function getCameras(): Promise<Camera[]> {
   try {
     const response = await fetch("/api/cameras", { cache: "no-store" })
-    if (!response.ok) return undefined
+    if (!response.ok) return []
 
     const cameras: unknown = await response.json()
-    if (!Array.isArray(cameras) || !isCameraApiPayload(cameras[0])) {
-      return undefined
+    if (!Array.isArray(cameras)) return []
+
+    return cameras.filter(isCameraApiPayload).map(mapCamera)
+  } catch {
+    return []
+  }
+}
+
+export type DeleteCameraResult =
+  | { success: true }
+  | { success: false; message: string }
+
+export async function deleteCamera(cameraId: string): Promise<DeleteCameraResult> {
+  try {
+    const response = await fetch(`/api/cameras/${encodeURIComponent(cameraId)}`, {
+      method: "DELETE",
+      cache: "no-store",
+    })
+
+    if (response.ok) return { success: true }
+
+    const payload: unknown = await response.json().catch(() => null)
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "detail" in payload &&
+      typeof payload.detail === "string"
+    ) {
+      return { success: false, message: payload.detail }
     }
 
-    const camera = cameras[0]
-    return {
-      id: camera.id,
-      name: camera.name,
-      source: camera.source,
-      openTimeoutMs: camera.open_timeout_ms,
-      readTimeoutMs: camera.read_timeout_ms,
-    }
+    return { success: false, message: "Không thể xoá camera." }
   } catch {
-    return undefined
+    return { success: false, message: "Không kết nối được backend camera." }
   }
 }

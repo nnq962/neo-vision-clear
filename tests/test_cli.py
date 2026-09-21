@@ -4,6 +4,7 @@ import unittest
 
 from walkway_monitor.cli import build_parser
 from walkway_monitor.config import DEFAULT_BASELINE_PATH
+from walkway_monitor.config import DEFAULT_INFERENCE_BATCH_SIZE
 
 
 class CliParserTestCase(unittest.TestCase):
@@ -35,7 +36,7 @@ class CliParserTestCase(unittest.TestCase):
         detection_args = parser.parse_args(["detect", "--source", "video.mp4"])
 
         self.assertEqual(calibration_args.output, DEFAULT_BASELINE_PATH)
-        self.assertEqual(detection_args.baseline, DEFAULT_BASELINE_PATH)
+        self.assertIsNone(detection_args.baseline)
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,51 @@ class CliParserTestCase(unittest.TestCase):
         )
 
         self.assertEqual(args.bev_pixels_per_meter, 120.0)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_inference_batch_size_arguments(self) -> None:
+        """Hai command phải có batch mặc định và nhận được giá trị tùy chỉnh."""
+        parser = build_parser()
+
+        calibration_args = parser.parse_args(
+            ["calibrate", "--source", "video.mp4", "--batch-size", "4"]
+        )
+        detection_args = parser.parse_args(["detect", "--source", "video.mp4"])
+
+        self.assertEqual(calibration_args.batch_size, 4)
+        self.assertEqual(
+            detection_args.batch_size,
+            DEFAULT_INFERENCE_BATCH_SIZE,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_repeated_sources_and_baselines_preserve_order(self) -> None:
+        """CLI phải giữ đúng thứ tự ghép cặp hai RTSP và hai baseline."""
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "detect",
+                "--source",
+                "rtsp://camera-1/stream",
+                "--source",
+                "rtsp://camera-2/stream",
+                "--baseline",
+                "data/camera-1/baseline.npz",
+                "--baseline",
+                "data/camera-2/baseline.npz",
+            ]
+        )
+
+        self.assertEqual(
+            args.source,
+            ["rtsp://camera-1/stream", "rtsp://camera-2/stream"],
+        )
+        self.assertEqual(
+            args.baseline,
+            ["data/camera-1/baseline.npz", "data/camera-2/baseline.npz"],
+        )
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from server.models.messages import (
     CorridorInfoData,
     CorridorInfoRequest,
     CorridorInfoResponse,
+    OverviewCameraInfo,
     OverviewInfoData,
     OverviewInfoRequest,
     OverviewInfoResponse,
@@ -116,11 +117,48 @@ async def overview_websocket(
     websocket: WebSocket,
     service: Annotated[MonitorService, Depends(get_monitor_service)],
 ) -> None:
-    """Trả snapshot kèm polygon sai khác cho dashboard frontend."""
-    await _serve_snapshots(
-        websocket,
-        service,
-        OverviewInfoRequest,
-        OverviewInfoResponse,
-        include_zones=True,
-    )
+    """Trả snapshot kèm polygon của mọi camera runtime cho dashboard."""
+    await websocket.accept()
+    try:
+        while True:
+            # Bước 1: xác thực request và giữ socket mở nếu client gửi sai.
+            payload = None
+            try:
+                payload = await websocket.receive_json()
+                request = OverviewInfoRequest.model_validate(payload)
+            except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+                response = ProtocolErrorResponse(
+                    request_id=_request_id_from_payload(payload),
+                    error=str(exc),
+                )
+                await websocket.send_json(response.model_dump(mode="json"))
+                continue
+
+            # Bước 2: đóng gói từng camera độc lập trong cùng một response.
+            items = []
+            for baseline_id, reading in service.read_overview_snapshots():
+                data = (
+                    OverviewInfoData.from_snapshot(
+                        reading.snapshot,
+                        reading.difference_zones,
+                    )
+                    if reading.snapshot is not None
+                    else None
+                )
+                items.append(
+                    OverviewCameraInfo(
+                        baseline_id=baseline_id,
+                        status=reading.status,
+                        age_ms=reading.age_ms,
+                        error=reading.error,
+                        data=data,
+                    )
+                )
+            response = OverviewInfoResponse(
+                request_id=request.request_id,
+                items=items,
+            )
+            await websocket.send_json(response.model_dump(mode="json"))
+    except WebSocketDisconnect:
+        # Client rời trang hoặc đóng kết nối là kết thúc bình thường.
+        return

@@ -312,6 +312,12 @@ camera đóng góp một frame cho mỗi lượt inference. Không có trường
 đang active sẽ loại các ID liên quan khỏi runtime; runtime tự tắt nếu không còn
 baseline nào được chọn.
 
+Trang Tổng quan lấy telemetry thiết bị qua `GET /api/system/metrics` mỗi 1 giây,
+độc lập với trạng thái runtime camera. API trả tải CPU tổng và từng lõi, tải GPU (%),
+số lõi CPU, xung GPU (MHz), nhiệt độ CPU/GPU (°C) và RAM dùng/khả dụng/tổng.
+Tải CPU cần hai lần lấy mẫu để tính delta; cảm biến không có trên hệ thống được
+trả về `null` thay vì làm lỗi API.
+
 Robot kết nối tới `ws://<host>:8000/ws/corridor` và gửi:
 
 ```json

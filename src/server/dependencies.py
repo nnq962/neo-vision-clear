@@ -6,6 +6,7 @@ from server.services.calibration import CalibrationService
 from server.services.camera_connection import CameraConnectionTester
 from server.services.config_store import ConfigStore
 from server.services.monitor import MonitorService
+from server.services.system_metrics import SystemMetricsService
 from server.services.uart import UartService
 
 
@@ -17,6 +18,18 @@ def get_monitor_service(connection: HTTPConnection) -> MonitorService:
     service = getattr(connection.app.state, "monitor_service", None)
     if service is None:
         raise RuntimeError("Monitor service chưa được lifespan khởi tạo.")
+    return service
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def get_system_metrics_service(connection: HTTPConnection) -> SystemMetricsService:
+    """Lấy service telemetry CPU/GPU dùng chung cho mọi request."""
+    # Bước 1: dùng cùng instance để tính delta CPU giữa các lần lấy mẫu.
+    service = getattr(connection.app.state, "system_metrics_service", None)
+    if service is None:
+        raise RuntimeError("System metrics service chưa được khởi tạo.")
     return service
 
 

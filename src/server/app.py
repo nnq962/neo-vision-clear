@@ -13,6 +13,7 @@ from server.routes import (
     cameras_router,
     health_router,
     runtime_router,
+    system_metrics_router,
     uart_router,
     websocket_router,
 )
@@ -20,6 +21,7 @@ from server.services.calibration import CalibrationService
 from server.services.camera_connection import CameraConnectionTester
 from server.services.config_store import ConfigStore
 from server.services.monitor import MonitorService
+from server.services.system_metrics import SystemMetricsService
 from server.services.uart import UartService
 from server.settings import ServerSettings
 
@@ -50,6 +52,7 @@ def create_app(
         resolved_settings.camera_config_path,
     )
     application.state.config_store = resolved_config_store
+    application.state.system_metrics_service = SystemMetricsService()
     application.state.camera_connection_tester = (
         camera_connection_tester or CameraConnectionTester()
     )
@@ -65,6 +68,7 @@ def create_app(
     application.include_router(calibration_router)
     application.include_router(health_router)
     application.include_router(runtime_router)
+    application.include_router(system_metrics_router)
     application.include_router(uart_router)
     application.include_router(websocket_router)
 

@@ -33,6 +33,7 @@ import { mapRuntimeProcessStatus } from "@/lib/server/runtime"
 import type { RuntimeProcessStatus } from "@/lib/types/runtime"
 
 import { startRuntime, stopRuntime } from "./actions"
+import { SystemMetricsPanel } from "./system-metrics-panel"
 
 const OVERVIEW_REFRESH_INTERVAL_MS = 100
 
@@ -383,6 +384,7 @@ export function OverviewDashboard({
     processStatus.status === "running" ||
     processStatus.status === "stopping"
   const shouldStream = processActive
+  const visibleConnection = shouldStream ? connection : "closed"
   const canStart =
     sources.length > 0 && sources.every((source) => source.baseline.ready)
   const controlDisabled = pending || processStatus.status === "stopping"
@@ -420,10 +422,7 @@ export function OverviewDashboard({
   }, [])
 
   useEffect(() => {
-    if (!shouldStream) {
-      setConnection("closed")
-      return
-    }
+    if (!shouldStream) return
 
     let cancelled = false
     let socket: WebSocket | undefined
@@ -466,8 +465,8 @@ export function OverviewDashboard({
         setConnection("open")
         setReadings(
           Object.fromEntries(
-            sources.map((source) => [
-              source.baseline.id,
+            (sourceKey ? sourceKey.split("|") : []).map((baselineId) => [
+              baselineId,
               { status: "warming_up" } satisfies CorridorReading,
             ])
           )
@@ -524,11 +523,11 @@ export function OverviewDashboard({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={connection === "open" ? "default" : "outline"}>
+          <Badge variant={visibleConnection === "open" ? "default" : "outline"}>
             <WifiIcon data-icon="inline-start" />
-            {connection === "open"
+            {visibleConnection === "open"
               ? "WebSocket"
-              : connection === "connecting"
+              : visibleConnection === "connecting"
                 ? "Đang kết nối"
                 : "Chưa kết nối"}
           </Badge>
@@ -559,6 +558,8 @@ export function OverviewDashboard({
           </Button>
         </div>
       </div>
+
+      <SystemMetricsPanel />
 
       {sources.length === 0 ? (
         <Alert>
@@ -606,7 +607,7 @@ export function OverviewDashboard({
             reading={
               readings[source.baseline.id] ?? { status: "warming_up" }
             }
-            streamActive={shouldStream && connection === "open"}
+            streamActive={visibleConnection === "open"}
           />
         ))}
       </section>

@@ -21,6 +21,7 @@ from server.services.config_store import (
 from server.services.mediamtx import MediaMtxClient, MediaMtxError
 from server.services.monitor import MonitorService
 from server.services.snapshot_store import SnapshotRead, SnapshotStore
+from server.services.system_metrics import SystemMetricsService
 
 __all__ = [
     "BaselineNotFoundError",
@@ -40,4 +41,5 @@ __all__ = [
     "MonitorService",
     "SnapshotRead",
     "SnapshotStore",
+    "SystemMetricsService",
 ]

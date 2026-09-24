@@ -39,7 +39,7 @@ function resolveWebRtcBaseUrl() {
   if (configuredUrl) return configuredUrl.replace(/\/$/, "")
   if (typeof window === "undefined") return ""
 
-  return `${window.location.protocol}//${window.location.hostname}:8889`
+  return `${window.location.origin}/webrtc`
 }
 
 export const PersistentLiveCameraContext =

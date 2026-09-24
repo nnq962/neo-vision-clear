@@ -243,7 +243,11 @@ class RtspReader(BaseReader):
         (GStreamer không có frame → pull_sample() block đến internal TCP timeout ~30s).
         Sau khi confirm frame thì apply production read_timeout_ms.
         """
-        _WARMUP_TIMEOUT_MS = 500  # mỗi lần cap.read() chờ tối đa 500ms
+        # Decoder phần cứng Jetson có thể cần vài giây để nạp plugin và
+        # chờ keyframe đầu tiên. Timeout 500ms khiến OpenCV gọi retrieve
+        # lúc GstSample chưa có và spam cảnh báo gst_sample_get_caps().
+        _WARMUP_TIMEOUT_MS = 5000
+        _WARMUP_ATTEMPTS = 2  # giữ tổng thời gian dò mỗi codec tối đa 10s
         for codec in ("h264", "h265"):
             cap = open_capture(
                 self._build_gstreamer_pipeline(url, codec),
@@ -254,7 +258,7 @@ class RtspReader(BaseReader):
             if not cap.isOpened():
                 cap.release()
                 continue
-            for _ in range(20):  # max 10s tổng (20 × 500ms)
+            for _ in range(_WARMUP_ATTEMPTS):
                 ok, frame = cap.read()
                 if ok and frame is not None:
                     if self._read_timeout_ms is not None and hasattr(

@@ -1,0 +1,131 @@
+name: neo-vision-clear
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.1
+    restart: unless-stopped
+
+    environment:
+      MTX_LOGLEVEL: info
+      MTX_WEBRTCADDITIONALHOSTS: ${NVC_LAN_IP:-10.70.22.170}
+
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+
+    expose:
+      - "8554"
+      - "8889"
+      - "9997"
+
+    ports:
+      # Chỉ host local dùng các cổng này để debug.
+      - "127.0.0.1:8554:8554/tcp"
+      - "127.0.0.1:8889:8889/tcp"
+      - "127.0.0.1:9997:9997/tcp"
+
+      # Trình duyệt trong LAN kết nối media WebRTC trực tiếp qua ICE.
+      - "8189:8189/udp"
+      - "8189:8189/tcp"
+
+    networks:
+      - neo-vision-clear
+
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: neo-vision-clear-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    runtime: nvidia
+    depends_on:
+      mediamtx:
+        condition: service_started
+
+    environment:
+      MEDIAMTX_API_URL: http://mediamtx:9997/v3
+      MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+      NVC_CONFIG_PATH: /app/data/config.json
+      NVC_BASELINES_PATH: /app/data/baselines
+      WALKWAY_CHECKPOINT: /app/weights/depth_anything_v2_vits.pth
+      WALKWAY_HOST: 0.0.0.0
+      WALKWAY_PORT: "8000"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+
+    volumes:
+      - ./backend/data:/app/data
+
+    expose:
+      - "8000"
+
+    ports:
+      # Giữ API khỏi LAN; truy cập chính đi qua frontend /api và /ws.
+      - "127.0.0.1:8000:8000"
+
+    networks:
+      - neo-vision-clear
+
+    shm_size: "1gb"
+    stop_grace_period: 15s
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
+
+    # Bỏ comment nếu runtime cần UART trên Jetson này.
+    # devices:
+    #   - /dev/ttyTHS4:/dev/ttyS4
+
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  frontend:
+    image: neo-vision-clear-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      backend:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+
+    environment:
+      BACKEND_UPSTREAM: http://backend:8000
+      MEDIAMTX_UPSTREAM: http://mediamtx:8889
+
+    ports:
+      - "3000:3000"
+
+    networks:
+      - neo-vision-clear
+
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  neo-vision-clear:
+    name: neo-vision-clear
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

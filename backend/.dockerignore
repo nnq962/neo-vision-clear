@@ -1,0 +1,23 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+__pycache__
+*.py[cod]
+*.log
+.env
+.env.*
+
+# Runtime state is mounted as a volume and must not be baked into the image.
+data
+
+# Development-only files.
+assets
+tests
+commands.txt
+main.py
+
+# Only the JetPack 5.1.6 ARM64 wheels are used by this image.
+wheels/pc-x86_64

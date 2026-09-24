@@ -430,3 +430,33 @@ src/server/
 ```
 
 Detection chạy theo từng frame và chỉ trả mask cùng các phép đo trung lập.
+
+## Docker trên NVIDIA Jetson
+
+Image backend dùng JetPack 5.x / ARM64 và cài các wheel NVIDIA có sẵn trong
+`wheels/jp5.1.6`. Build từ thư mục gốc dự án:
+
+```bash
+docker build -t neo-vision-clear-backend ./backend
+```
+
+Chạy container cùng network với MediaMTX, mount dữ liệu camera/baseline và
+cho phép NVIDIA Container Runtime truy cập GPU:
+
+```bash
+docker run --rm \
+  --name backend \
+  --runtime nvidia \
+  --network neo-vision-clear \
+  -p 8000:8000 \
+  -v "$(pwd)/backend/data:/app/data" \
+  neo-vision-clear-backend
+```
+
+Nếu runtime cần gửi UART, thêm thiết bị tương ứng, ví dụ
+`--device /dev/ttyS4:/dev/ttyS4`. Image mặc định kết nối
+`http://mediamtx:9997/v3` và `rtsp://mediamtx:8554`; có thể ghi đè bằng
+`MEDIAMTX_API_URL` và `MEDIAMTX_RTSP_URL`.
+
+Checkpoint được đóng gói sẵn tại `/app/weights`. Còn `/app/data` là volume
+runtime để camera, calibration và baseline không bị mất khi thay container.

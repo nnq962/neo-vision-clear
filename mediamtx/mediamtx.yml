@@ -1,5 +1,31 @@
 logLevel: info
 
+authMethod: internal
+authInternalUsers:
+  # Cho phép client xem/phát stream như cấu hình mặc định.
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+        path:
+      - action: read
+        path:
+      - action: playback
+        path:
+
+  # Control API chỉ dành cho host và các container trong network dự án.
+  - user: any
+    pass:
+    ips:
+      - 127.0.0.1
+      - ::1
+      - 172.30.0.0/24
+    permissions:
+      - action: api
+      - action: metrics
+      - action: pprof
+
 api: yes
 apiAddress: :9997
 
@@ -8,6 +34,8 @@ webrtcAddress: :8889
 webrtcEncryption: no
 webrtcAllowOrigins:
   - "*"
+webrtcAdditionalHosts:
+  - 10.70.22.170
 webrtcLocalUDPAddress: :8189
 webrtcLocalTCPAddress: :8189
 

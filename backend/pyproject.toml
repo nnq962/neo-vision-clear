@@ -1,0 +1,61 @@
+[project]
+name = "neo-vision-clear"
+version = "0.1.0"
+description = "Fixed-camera occupancy detection demo using OpenCV"
+readme = "README.md"
+requires-python = ">=3.8,<3.9"
+dependencies = [
+    "colorlog>=6.9,<6.10",
+    "eval-type-backport>=0.2.2",
+    "fastapi>=0.115,<0.124",
+    "numpy>=1.24,<1.25",
+    "opencv-contrib-python==4.13.0.90",
+    "pillow>=10,<11",
+    "pyserial>=3.5",
+    "pytz>=2026.2",
+    "pyyaml>=6.0.3",
+    "torch==2.1.0a0+41361538.nv23.6",
+    "torchvision==0.16.1",
+    "uvicorn>=0.30,<0.34",
+    "websockets>=13,<14",
+    "yt-dlp>=2024.1,<2025",
+]
+
+[project.scripts]
+walkway-monitor = "walkway_monitor.cli:main"
+walkway-server = "server.__main__:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+opencv-contrib-python = { path = "wheels/jp5.1.6/opencv_contrib_python-4.13.0.90-cp38-cp38-linux_aarch64.whl" }
+torch = { path = "wheels/jp5.1.6/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl" }
+torchvision = { path = "wheels/jp5.1.6/torchvision-0.16.1-cp38-cp38-linux_aarch64.whl" }
+
+[tool.setuptools]
+packages = [
+    "walkway_monitor",
+    "walkway_monitor.calibration",
+    "walkway_monitor.depth",
+    "walkway_monitor.detection",
+    "walkway_monitor.ui",
+    "server",
+    "server.models",
+    "server.routes",
+    "server.services",
+    "depth_anything_v2",
+    "depth_anything_v2.dinov2_layers",
+    "depth_anything_v2.util",
+    "media_sources",
+    "media_sources.readers",
+    "uart",
+    "utils",
+]
+package-dir = { "" = "src" }
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27,<0.29",
+]

@@ -17,12 +17,13 @@ cd backend
 uv sync
 ```
 
-Đặt checkpoint Depth Anything V2 vào thư mục `weights/`. Tên mặc định theo encoder:
+Đặt checkpoint Depth Anything V2 vào thư mục
+`weights/pytorch/depth-anything-v2/`. Tên mặc định theo encoder:
 
 ```text
-weights/depth_anything_v2_vits.pth
-weights/depth_anything_v2_vitb.pth
-weights/depth_anything_v2_vitl.pth
+weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth
+weights/pytorch/depth-anything-v2/depth_anything_v2_vitb.pth
+weights/pytorch/depth-anything-v2/depth_anything_v2_vitl.pth
 ```
 
 `vits` là encoder mặc định và phù hợp để bắt đầu thử nghiệm.
@@ -146,7 +147,8 @@ uv run walkway-monitor detect \
 ```
 
 Checkpoint mặc định được chọn từ encoder lưu trong baseline. Ví dụ baseline dùng `vits` thì
-CLI tự đọc `weights/depth_anything_v2_vits.pth`.
+CLI tự đọc
+`weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth`.
 
 Cửa sổ debug hiển thị theo lưới 2x2:
 
@@ -458,5 +460,6 @@ Nếu runtime cần gửi UART, thêm thiết bị tương ứng, ví dụ
 `http://mediamtx:9997/v3` và `rtsp://mediamtx:8554`; có thể ghi đè bằng
 `MEDIAMTX_API_URL` và `MEDIAMTX_RTSP_URL`.
 
-Checkpoint được đóng gói sẵn tại `/app/weights`. Còn `/app/data` là volume
-runtime để camera, calibration và baseline không bị mất khi thay container.
+Checkpoint được đóng gói sẵn tại
+`/app/weights/pytorch/depth-anything-v2`. Còn `/app/data` là volume runtime để
+camera, calibration và baseline không bị mất khi thay container.

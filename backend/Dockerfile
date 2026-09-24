@@ -7,6 +7,15 @@ ARG BASE_IMAGE=nvcr.io/nvidia/l4t-jetpack:r35.4.1
 FROM ${BASE_IMAGE}
 
 ARG UV_VERSION=0.12.16
+ARG ASSET_BASE_URL=https://huggingface.co/quyetnguyen0188/assets/resolve/main
+ARG DEPTH_CHECKPOINT_URL=${ASSET_BASE_URL}/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth
+ARG DEPTH_CHECKPOINT_SHA256=715fade13be8f229f8a70cc02066f656f2423a59effd0579197bbf57860e1378
+ARG OPENCV_WHEEL_URL=${ASSET_BASE_URL}/wheels/jp5.1.6/opencv_contrib_python-4.13.0.90-cp38-cp38-linux_aarch64.whl
+ARG OPENCV_WHEEL_SHA256=b7dae96844a5591361ac1e610442f12c405c1f7fa1c13272863807fca512a1c7
+ARG TORCH_WHEEL_URL=${ASSET_BASE_URL}/wheels/jp5.1.6/torch-2.1.0a0%2B41361538.nv23.06-cp38-cp38-linux_aarch64.whl
+ARG TORCH_WHEEL_SHA256=5112e2ef5051f1003ae2ffb545ae596377df66979d62a954d774f18009064dbe
+ARG TORCHVISION_WHEEL_URL=${ASSET_BASE_URL}/wheels/jp5.1.6/torchvision-0.16.1-cp38-cp38-linux_aarch64.whl
+ARG TORCHVISION_WHEEL_SHA256=fa636d72b33bf7ab0fa7f0141cdd58ac97d685f539f332ba79002507074a49bd
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -17,7 +26,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/venv/bin:${PATH}" \
     NVC_CONFIG_PATH=/app/data/config.json \
     NVC_BASELINES_PATH=/app/data/baselines \
-    WALKWAY_CHECKPOINT=/app/weights/depth_anything_v2_vits.pth \
+    WALKWAY_CHECKPOINT=/app/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
     WALKWAY_HOST=0.0.0.0 \
     WALKWAY_PORT=8000 \
     MEDIAMTX_API_URL=http://mediamtx:9997/v3 \
@@ -30,6 +39,7 @@ RUN test "$(uname -m)" = "aarch64" \
     && apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
+        curl \
         ffmpeg \
         fonts-dejavu-core \
         gstreamer1.0-libav \
@@ -54,7 +64,29 @@ RUN test "$(uname -m)" = "aarch64" \
 
 # Keep the dependency layer reusable when only application source changes.
 COPY pyproject.toml uv.lock README.md ./
-COPY wheels ./wheels
+
+# The JetPack wheels and model checkpoint are intentionally not stored in Git.
+# Downloading them here makes a clean clone buildable and keeps exact file paths
+# expected by pyproject.toml and WALKWAY_CHECKPOINT.
+RUN mkdir -p /app/wheels/jp5.1.6 /app/weights/pytorch/depth-anything-v2 \
+    && curl --fail --location --retry 5 --retry-connrefused \
+        --output /app/wheels/jp5.1.6/opencv_contrib_python-4.13.0.90-cp38-cp38-linux_aarch64.whl \
+        "${OPENCV_WHEEL_URL}" \
+    && curl --fail --location --retry 5 --retry-connrefused \
+        --output /app/wheels/jp5.1.6/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl \
+        "${TORCH_WHEEL_URL}" \
+    && curl --fail --location --retry 5 --retry-connrefused \
+        --output /app/wheels/jp5.1.6/torchvision-0.16.1-cp38-cp38-linux_aarch64.whl \
+        "${TORCHVISION_WHEEL_URL}" \
+    && curl --fail --location --retry 5 --retry-connrefused \
+        --output /app/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
+        "${DEPTH_CHECKPOINT_URL}" \
+    && printf '%s  %s\n' \
+        "${OPENCV_WHEEL_SHA256}" /app/wheels/jp5.1.6/opencv_contrib_python-4.13.0.90-cp38-cp38-linux_aarch64.whl \
+        "${TORCH_WHEEL_SHA256}" /app/wheels/jp5.1.6/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl \
+        "${TORCHVISION_WHEEL_SHA256}" /app/wheels/jp5.1.6/torchvision-0.16.1-cp38-cp38-linux_aarch64.whl \
+        "${DEPTH_CHECKPOINT_SHA256}" /app/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
+        | sha256sum --check --strict
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install "uv==${UV_VERSION}"
@@ -63,7 +95,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
-COPY weights ./weights
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev \

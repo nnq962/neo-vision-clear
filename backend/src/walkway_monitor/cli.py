@@ -38,7 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     calibration_parser.add_argument(
         "--checkpoint",
-        help="Checkpoint model; mặc định weights/depth_anything_v2_<encoder>.pth.",
+        help=(
+            "Checkpoint model; mặc định "
+            "weights/pytorch/depth-anything-v2/depth_anything_v2_<encoder>.pth."
+        ),
     )
     calibration_parser.add_argument(
         "--encoder",
@@ -94,7 +97,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     detection_parser.add_argument(
         "--checkpoint",
-        help="Checkpoint model; mặc định lấy encoder baseline trong thư mục weights/.",
+        help=(
+            "Checkpoint model; mặc định lấy encoder baseline trong thư mục "
+            "weights/pytorch/depth-anything-v2/."
+        ),
     )
     detection_parser.add_argument("--noise-multiplier", type=float, default=6.0)
     detection_parser.add_argument("--minimum-difference", type=float, default=0.03)

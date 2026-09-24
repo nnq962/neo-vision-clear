@@ -90,6 +90,12 @@ Build image và khởi động cả ba service:
 docker compose up -d --build
 ```
 
+Ở lần build backend đầu tiên, Docker tự tải ba wheel dành cho JetPack
+5.1.6 và checkpoint Depth Anything V2 từ Hugging Face, sau đó kiểm tra
+SHA256 trước khi cài đặt. Không cần chép thủ công thư mục `backend/wheels`
+hoặc `backend/weights` vào bản clone mới. Các lần build sau sẽ dùng lại
+Docker layer cache nếu URL và checksum không thay đổi.
+
 Những lần sau, khi code và Dockerfile không thay đổi:
 
 ```bash
@@ -226,7 +232,9 @@ sudo tegrastats
 
 ## Build image thủ công
 
-Backend cần BuildKit vì Dockerfile dùng cache mount:
+Backend cần BuildKit và Buildx vì Dockerfile dùng cache mount. Xem phần
+"Yêu cầu Docker trên Jetson" trong `README.md` để cài đặt và kiểm tra. Khi
+build ngoài Compose, bật BuildKit rõ ràng bằng:
 
 ```bash
 cd backend

@@ -8,6 +8,7 @@ from pathlib import Path
 
 DEFAULT_BASELINES_DIRECTORY = "data/baselines"
 DEFAULT_BASELINE_PATH = f"{DEFAULT_BASELINES_DIRECTORY}/default/baseline.npz"
+DEFAULT_CHECKPOINTS_DIRECTORY = Path("weights") / "pytorch" / "depth-anything-v2"
 DEFAULT_INFERENCE_BATCH_SIZE = 2
 SUPPORTED_ENCODERS = ("vits", "vitb", "vitl")
 
@@ -20,7 +21,7 @@ def default_checkpoint_path(encoder: str) -> Path:
     # Bước 1: báo lỗi sớm để CLI và server dùng cùng một quy tắc encoder.
     if encoder not in SUPPORTED_ENCODERS:
         raise ValueError(f"Encoder không được hỗ trợ: {encoder}")
-    return Path("weights") / f"depth_anything_v2_{encoder}.pth"
+    return DEFAULT_CHECKPOINTS_DIRECTORY / f"depth_anything_v2_{encoder}.pth"
 
 
 @dataclass(frozen=True)

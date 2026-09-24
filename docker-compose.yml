@@ -7,7 +7,7 @@ services:
 
     environment:
       MTX_LOGLEVEL: info
-      MTX_WEBRTCADDITIONALHOSTS: ${NVC_LAN_IP:-10.70.22.170}
+      MTX_WEBRTCADDITIONALHOSTS: "${NVC_LAN_IP:?Set NVC_LAN_IP in the root .env file}"
 
     volumes:
       - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
@@ -52,7 +52,7 @@ services:
       MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
       NVC_CONFIG_PATH: /app/data/config.json
       NVC_BASELINES_PATH: /app/data/baselines
-      WALKWAY_CHECKPOINT: /app/weights/depth_anything_v2_vits.pth
+      WALKWAY_CHECKPOINT: /app/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth
       WALKWAY_HOST: 0.0.0.0
       WALKWAY_PORT: "8000"
       NVIDIA_VISIBLE_DEVICES: all

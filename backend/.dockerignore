@@ -19,5 +19,6 @@ tests
 commands.txt
 main.py
 
-# Only the JetPack 5.1.6 ARM64 wheels are used by this image.
-wheels/pc-x86_64
+# Binary artifacts are downloaded and checksum-verified by the Dockerfile.
+wheels
+weights

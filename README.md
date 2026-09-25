@@ -104,8 +104,7 @@ docker compose ps
 docker compose logs -f
 ```
 
-Mở dashboard trong LAN tại `http://<NVC_LAN_IP>:3000`. Ví dụ với file mẫu:
-`http://10.70.22.170:3000`. API backend và
+Mở dashboard trong LAN tại `http://<NVC_LAN_IP>:3000`. API backend và
 MediaMTX signaling được frontend chuyển tiếp cùng origin; cổng WebRTC ICE
 `8189` TCP/UDP được public trực tiếp.
 

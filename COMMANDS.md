@@ -48,6 +48,9 @@ uv run walkway-server
 
 ```bash
 cd frontend
+set -a
+source ../.env
+set +a
 npm run dev -- --hostname 0.0.0.0
 ```
 
@@ -61,7 +64,7 @@ npm ci
 Truy cập frontend development:
 
 ```text
-http://10.70.22.170:3000
+http://<NVC_LAN_IP>:3000
 ```
 
 Dừng backend và frontend bằng `Ctrl+C`, sau đó dừng MediaMTX:
@@ -81,7 +84,7 @@ cp .env.example .env
 Kiểm tra IP LAN trong `.env`:
 
 ```env
-NVC_LAN_IP=10.70.22.170
+NVC_LAN_IP=<JETSON_LAN_IP>
 ```
 
 Build image và khởi động cả ba service:
@@ -105,7 +108,7 @@ docker compose up -d
 Dashboard:
 
 ```text
-http://10.70.22.170:3000
+http://<NVC_LAN_IP>:3000
 ```
 
 ### Trạng thái và log

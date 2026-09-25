@@ -32,10 +32,11 @@ vẫn đi trực tiếp tới cổng ICE `8189` TCP/UDP do MediaMTX công bố.
 
 ## Phát triển cục bộ
 
-Tạo file `.env.local` nếu backend không chạy cùng origin:
+Tạo file `.env.local` để Next.js dev server proxy tới backend và MediaMTX
+đang chạy trên cùng máy:
 
 ```env
-NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000
+BACKEND_UPSTREAM=http://127.0.0.1:8000
 NEXT_PUBLIC_MEDIAMTX_WEBRTC_URL=/webrtc
 MEDIAMTX_UPSTREAM=http://127.0.0.1:8889
 ```

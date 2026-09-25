@@ -1,13 +1,16 @@
 import type { NextConfig } from "next";
 
 const isDevelopment = process.env.NODE_ENV === "development";
-const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, "");
+const lanIp = process.env.NVC_LAN_IP?.trim();
+const backendUrl = (
+  process.env.BACKEND_UPSTREAM ?? process.env.NEXT_PUBLIC_BACKEND_URL
+)?.replace(/\/$/, "");
 const mediaMtxUrl = (
   process.env.MEDIAMTX_UPSTREAM ?? "http://127.0.0.1:8889"
 ).replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["10.70.22.170", "192.168.68.144"],
+  ...(isDevelopment && lanIp ? { allowedDevOrigins: [lanIp] } : {}),
   ...(isDevelopment
     ? {
         async rewrites() {

@@ -14,7 +14,11 @@ from server.services.camera_connection import CameraConnectionError
 from server.services.config_store import ConfigStore
 from server.services.snapshot_store import SnapshotRead, SnapshotStore
 from server.settings import ServerSettings
-from walkway_monitor.detection.models import CorridorSnapshot
+from walkway_monitor.detection.models import (
+    ClearanceZone,
+    CorridorSnapshot,
+    ZoneClearance,
+)
 from walkway_monitor.detection.zones import DifferenceZone
 
 
@@ -182,60 +186,16 @@ class ServerAppTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def test_websocket_returns_correlated_snapshot(self) -> None:
-        """WebSocket phải giữ request_id và trả đầy đủ phép đo mới nhất."""
-        def factory(settings: ServerSettings) -> FakeMonitorService:
-            """Tạo service có snapshot giả mà không phụ thuộc autostart."""
-            service = FakeMonitorService(settings)
-            service.snapshot_store.publish(
-                CorridorSnapshot(
-                    maximum_passable_width_meters=0.82,
-                    walkway_width_meters=1.75,
-                    bottleneck_y_meters=2.35,
-                    bottleneck_free_x_ranges_meters=((0.0, 0.82),),
-                    frame_index=12,
-                    captured_at=1234.5,
-                )
-            )
-            return service
-
-        application = create_app(
-            self.settings,
-            monitor_factory=factory,
-        )
-
-        # Gửi request hợp lệ trên một kết nối có lifespan đang hoạt động.
-        with TestClient(application) as client:
-            with client.websocket_connect("/ws/corridor") as websocket:
-                websocket.send_json(
-                    {"type": "get_corridor_info", "request_id": "req-01"}
-                )
-                response = websocket.receive_json()
-
-        self.assertEqual(response["type"], "corridor_info")
-        self.assertEqual(response["request_id"], "req-01")
-        self.assertEqual(response["status"], "ok")
-        self.assertEqual(
-            response["data"]["maximum_passable_width_meters"],
-            0.82,
-        )
-
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def test_websocket_rejects_invalid_message(self) -> None:
-        """Message sai type phải nhận protocol error mà không đóng kết nối."""
+    def test_old_corridor_websocket_is_removed(self) -> None:
+        """Backend không còn công bố protocol robot request-response cũ."""
         application = create_app(
             self.settings,
             monitor_factory=lambda settings: FakeMonitorService(settings),
         )
 
-        with TestClient(application) as client:
-            with client.websocket_connect("/ws/corridor") as websocket:
-                websocket.send_json({"type": "unknown", "request_id": "req-02"})
-                response = websocket.receive_json()
+        paths = {route.path for route in application.routes}
 
-        self.assertEqual(response["type"], "error")
-        self.assertEqual(response["code"], "invalid_message")
+        self.assertNotIn("/ws/corridor", paths)
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -251,6 +211,25 @@ class ServerAppTestCase(unittest.TestCase):
                 bottleneck_free_x_ranges_meters=((0.0, 0.82),),
                 frame_index=12,
                 captured_at=1234.5,
+                zone_clearance=ZoneClearance(
+                    zones=(
+                        ClearanceZone(
+                            index=1,
+                            name="zone_1",
+                            start_ratio=0.0,
+                            end_ratio=1.0,
+                            free_ratio=0.8,
+                            occupancy_ratio=0.2,
+                            blocked=False,
+                            camera_polygon=(
+                                (0.2, 0.3),
+                                (0.8, 0.3),
+                                (0.8, 0.9),
+                                (0.2, 0.9),
+                            ),
+                        ),
+                    ),
+                ),
             )
             zone = DifferenceZone(
                 polygon=((0.2, 0.3), (0.4, 0.3), (0.4, 0.6)),
@@ -261,7 +240,7 @@ class ServerAppTestCase(unittest.TestCase):
 
         application = create_app(self.settings, monitor_factory=factory)
 
-        # Gửi message riêng của overview để không thay đổi protocol robot cũ.
+        # Gửi message riêng của overview dành cho dashboard nội bộ.
         with TestClient(application) as client:
             with client.websocket_connect("/ws/overview") as websocket:
                 websocket.send_json(
@@ -281,29 +260,10 @@ class ServerAppTestCase(unittest.TestCase):
             response["items"][0]["data"]["changed_zones"][0]["polygon"],
             [[0.2, 0.3], [0.4, 0.3], [0.4, 0.6]],
         )
-
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def test_websocket_reports_warming_up_without_snapshot(self) -> None:
-        """Server chưa có frame phải trả warming_up thay vì số đo giả."""
-        application = create_app(
-            self.settings,
-            monitor_factory=lambda settings: FakeMonitorService(
-                settings,
-                publish_on_start=False,
-            ),
+        self.assertEqual(
+            response["items"][0]["data"]["zones"][0]["camera_polygon"],
+            [[0.2, 0.3], [0.8, 0.3], [0.8, 0.9], [0.2, 0.9]],
         )
-
-        with TestClient(application) as client:
-            with client.websocket_connect("/ws/corridor") as websocket:
-                websocket.send_json(
-                    {"type": "get_corridor_info", "request_id": "req-03"}
-                )
-                response = websocket.receive_json()
-
-        self.assertEqual(response["status"], "warming_up")
-        self.assertIsNone(response["data"])
-
 
 if __name__ == "__main__":
     unittest.main()

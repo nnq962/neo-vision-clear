@@ -57,6 +57,26 @@ class CliParserTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def test_zone_clearance_arguments(self) -> None:
+        """CLI phải nhận số đoạn và ngưỡng tỷ lệ trống của hành lang."""
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "detect",
+                "--source",
+                "video.mp4",
+                "--zone-count",
+                "12",
+                "--minimum-zone-free-ratio",
+                "0.45",
+            ]
+        )
+
+        self.assertEqual(args.zone_count, 12)
+        self.assertEqual(args.minimum_zone_free_ratio, 0.45)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def test_inference_batch_size_arguments(self) -> None:
         """Hai command phải có batch mặc định và nhận được giá trị tùy chỉnh."""
         parser = build_parser()

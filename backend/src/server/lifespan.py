@@ -31,8 +31,14 @@ def create_lifespan(
         # Bước 1: tạo service và công bố qua app.state trước khi nhận request.
         service = monitor_factory(settings)
         app.state.monitor_service = service
+        aggregator_publisher = getattr(app.state, "aggregator_publisher", None)
+        if aggregator_publisher is not None:
+            # Bước 2: callback không chặn cho phép worker đẩy ngay mỗi kết quả.
+            if hasattr(service, "set_output_publisher"):
+                service.set_output_publisher(aggregator_publisher.publish)
+            aggregator_publisher.start()
 
-        # Bước 2: MediaMTX không lưu path động sau restart, nên khôi phục toàn bộ
+        # Bước 3: MediaMTX không lưu path động sau restart, nên khôi phục toàn bộ
         # camera từ config trước khi frontend tạo các player.
         for camera in app.state.config_store.list_cameras():
             try:
@@ -49,7 +55,7 @@ def create_lifespan(
                     exc,
                 )
 
-        # Bước 3: UART là hạ tầng tùy chọn; lỗi port không được chặn FastAPI.
+        # Bước 4: UART là hạ tầng tùy chọn; lỗi port không được chặn FastAPI.
         uart_service = getattr(app.state, "uart_service", None)
         if uart_service is not None:
             try:
@@ -61,20 +67,22 @@ def create_lifespan(
             # khiển start/stop sẽ chủ động gọi service ở giai đoạn tiếp theo.
             yield
         finally:
-            # Bước 4: dừng calibration đang chạy trước khi giải phóng monitor.
+            # Bước 5: dừng calibration đang chạy trước khi giải phóng monitor.
             calibration_service = getattr(app.state, "calibration_service", None)
             if calibration_service is not None:
                 calibration_service.stop()
 
-            # Bước 5: đóng UART độc lập, kể cả khi chưa từng kết nối thành công.
+            # Bước 6: đóng UART độc lập, kể cả khi chưa từng kết nối thành công.
             if uart_service is not None:
                 try:
                     uart_service.close()
                 except Exception as exc:
                     LOGGER.warning("Không thể đóng UART hoàn toàn: %s", exc)
 
-            # Bước 6: stop vẫn an toàn nếu runtime chưa từng được khởi động.
+            # Bước 7: stop vẫn an toàn nếu runtime chưa từng được khởi động.
             service.stop()
+            if aggregator_publisher is not None:
+                aggregator_publisher.close()
             app.state.monitor_service = None
 
     return lifespan

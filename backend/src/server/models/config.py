@@ -27,6 +27,8 @@ class RuntimeDetectionConfig(BaseModel):
     depth_alignment: bool = True
     alignment_inlier_ratio: float = Field(default=0.55, gt=0.5, le=1)
     display_minimum_area_ratio: float = Field(default=0.001, ge=0, lt=1)
+    zone_count: int = Field(default=10, ge=1, le=100)
+    minimum_zone_free_ratio: float = Field(default=0.4, ge=0, le=1)
 
     # ─────────────────────────────────────────────────────────────────────────
 

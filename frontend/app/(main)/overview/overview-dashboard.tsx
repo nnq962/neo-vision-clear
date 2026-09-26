@@ -1,10 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState, useTransition } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import {
   ActivityIcon,
+  ArrowDownIcon,
   CameraIcon,
+  CircleCheckIcon,
   CircleStopIcon,
   LoaderCircleIcon,
   PlayIcon,
@@ -27,6 +29,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { CameraIdentity } from "@/lib/types/camera"
 import { mapRuntimeProcessStatus } from "@/lib/server/runtime"
 import type { RuntimeProcessStatus } from "@/lib/types/runtime"
@@ -35,6 +42,7 @@ import { startRuntime, stopRuntime } from "./actions"
 import { SystemMetricsPanel } from "./system-metrics-panel"
 
 const OVERVIEW_REFRESH_INTERVAL_MS = 100
+const FPS_SMOOTHING_ALPHA = 0.25
 
 type ActiveBaseline = {
   id: string
@@ -53,6 +61,17 @@ type DifferenceZone = {
   areaRatio: number
 }
 
+type ClearanceZone = {
+  index: number
+  name: string
+  startRatio: number
+  endRatio: number
+  freeRatio: number
+  occupancyRatio: number
+  blocked: boolean
+  cameraPolygon: [number, number][]
+}
+
 type CorridorData = {
   maximumPassableWidthMeters: number
   walkwayWidthMeters: number
@@ -61,6 +80,11 @@ type CorridorData = {
   frameIndex: number
   capturedAt: number
   differenceZones: DifferenceZone[]
+  zones: ClearanceZone[]
+  minimumFreeRatio: number
+  minimumRequiredRatio: number
+  blockedZoneIndices: number[]
+  canPass: boolean
 }
 
 type CorridorReading = {
@@ -71,6 +95,16 @@ type CorridorReading = {
 }
 
 type ConnectionState = "closed" | "connecting" | "open" | "error"
+
+type CameraFpsSample = {
+  frameIndex: number
+  capturedAt: number
+}
+
+type CameraFpsTracker = {
+  samples: Record<string, CameraFpsSample>
+  values: Record<string, number>
+}
 
 function processStatusLabel(status: RuntimeProcessStatus["status"]): string {
   const labels: Record<RuntimeProcessStatus["status"], string> = {
@@ -118,6 +152,69 @@ function formatAge(ageMs: number | undefined): string {
   return `${(ageMs / 1000).toFixed(1)} giây trước`
 }
 
+function formatPercentage(value: number): string {
+  return `${Math.round(value * 100)}%`
+}
+
+function formatFps(value: number | undefined): string {
+  return value === undefined ? "—" : `${value.toFixed(1)} FPS`
+}
+
+function polygonCenter(polygon: [number, number][]): [number, number] {
+  const total = polygon.reduce(
+    ([xTotal, yTotal], [xValue, yValue]) => [
+      xTotal + xValue,
+      yTotal + yValue,
+    ],
+    [0, 0]
+  )
+  return [total[0] / polygon.length, total[1] / polygon.length]
+}
+
+function polygonHeight(polygon: [number, number][]): number {
+  const yValues = polygon.map(([, yValue]) => yValue)
+  return Math.max(...yValues) - Math.min(...yValues)
+}
+
+function trackCameraFps(
+  readings: Record<string, CorridorReading>,
+  tracker: CameraFpsTracker
+): CameraFpsTracker {
+  const samples = { ...tracker.samples }
+  let values = tracker.values
+
+  for (const [baselineId, reading] of Object.entries(readings)) {
+    const data = reading.status === "ok" ? reading.data : undefined
+    if (!data) continue
+
+    const previousSample = tracker.samples[baselineId]
+    if (previousSample?.frameIndex === data.frameIndex) continue
+
+    samples[baselineId] = {
+      frameIndex: data.frameIndex,
+      capturedAt: data.capturedAt,
+    }
+    if (!previousSample) continue
+
+    const elapsedSeconds = data.capturedAt - previousSample.capturedAt
+    const processedFrames = data.frameIndex - previousSample.frameIndex
+    if (elapsedSeconds <= 0 || processedFrames <= 0) continue
+
+    const instantFps = processedFrames / elapsedSeconds
+    if (!Number.isFinite(instantFps)) continue
+
+    const previousFps = tracker.values[baselineId]
+    const smoothedFps = previousFps === undefined
+      ? instantFps
+      : previousFps * (1 - FPS_SMOOTHING_ALPHA) +
+        instantFps * FPS_SMOOTHING_ALPHA
+    if (values === tracker.values) values = { ...values }
+    values[baselineId] = smoothedFps
+  }
+
+  return { samples, values }
+}
+
 function parseCorridorReading(value: unknown): CorridorReading | undefined {
   if (typeof value !== "object" || value === null) return undefined
   const payload = value as Record<string, unknown>
@@ -143,6 +240,7 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
   const bottleneckPayload = bottleneck as Record<string, unknown>
   const freeRanges = bottleneckPayload.free_x_ranges_meters
   const changedZones = data.changed_zones
+  const clearanceZones = data.zones
   if (
     typeof data.maximum_passable_width_meters !== "number" ||
     typeof data.walkway_width_meters !== "number" ||
@@ -156,7 +254,15 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
         range.length === 2 &&
         range.every((coordinate) => typeof coordinate === "number")
     ) ||
-    !Array.isArray(changedZones)
+    !Array.isArray(changedZones) ||
+    !Array.isArray(clearanceZones) ||
+    typeof data.minimum_free_ratio !== "number" ||
+    typeof data.minimum_required_ratio !== "number" ||
+    !Array.isArray(data.blocked_zone_indices) ||
+    !data.blocked_zone_indices.every(
+      (index) => typeof index === "number" && Number.isInteger(index)
+    ) ||
+    typeof data.can_pass !== "boolean"
   ) {
     return { status, ageMs, error }
   }
@@ -189,6 +295,51 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
       areaRatio: zonePayload.area_ratio,
     })
   }
+  const zones: ClearanceZone[] = []
+  for (const zone of clearanceZones) {
+    if (typeof zone !== "object" || zone === null) return { status, ageMs, error }
+    const zonePayload = zone as Record<string, unknown>
+    const cameraPolygon = zonePayload.camera_polygon
+    if (
+      typeof zonePayload.index !== "number" ||
+      !Number.isInteger(zonePayload.index) ||
+      typeof zonePayload.name !== "string" ||
+      typeof zonePayload.start_ratio !== "number" ||
+      typeof zonePayload.end_ratio !== "number" ||
+      typeof zonePayload.free_ratio !== "number" ||
+      typeof zonePayload.occupancy_ratio !== "number" ||
+      typeof zonePayload.blocked !== "boolean" ||
+      (cameraPolygon !== undefined &&
+        (!Array.isArray(cameraPolygon) ||
+          cameraPolygon.length > 8 ||
+          !cameraPolygon.every(
+            (point) =>
+              Array.isArray(point) &&
+              point.length === 2 &&
+              point.every(
+                (coordinate) =>
+                  typeof coordinate === "number" &&
+                  Number.isFinite(coordinate) &&
+                  coordinate >= 0 &&
+                  coordinate <= 1
+              )
+          )))
+    ) {
+      return { status, ageMs, error }
+    }
+    zones.push({
+      index: zonePayload.index,
+      name: zonePayload.name,
+      startRatio: zonePayload.start_ratio,
+      endRatio: zonePayload.end_ratio,
+      freeRatio: zonePayload.free_ratio,
+      occupancyRatio: zonePayload.occupancy_ratio,
+      blocked: zonePayload.blocked,
+      cameraPolygon: Array.isArray(cameraPolygon)
+        ? cameraPolygon as [number, number][]
+        : [],
+    })
+  }
   return {
     status,
     ageMs,
@@ -201,6 +352,11 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
       frameIndex: data.frame_index,
       capturedAt: data.captured_at,
       differenceZones,
+      zones,
+      minimumFreeRatio: data.minimum_free_ratio,
+      minimumRequiredRatio: data.minimum_required_ratio,
+      blockedZoneIndices: data.blocked_zone_indices as number[],
+      canPass: data.can_pass,
     },
   }
 }
@@ -239,14 +395,158 @@ function overviewWebSocketUrl(): string {
   return `${protocol}//${window.location.host}/ws/overview`
 }
 
+function ClearanceZonesPanel({ data }: { data: CorridorData }) {
+  const minimumZone = data.zones.reduce<ClearanceZone | undefined>(
+    (minimum, zone) =>
+      minimum === undefined || zone.freeRatio < minimum.freeRatio
+        ? zone
+        : minimum,
+    undefined
+  )
+  const orderedZones = [...data.zones].sort(
+    (first, second) => first.startRatio - second.startRatio
+  )
+  const showZoneLabels = orderedZones.length <= 14
+  const zoneRows = orderedZones
+    .map((zone) => `${Math.max(zone.endRatio - zone.startRatio, 0.001)}fr`)
+    .join(" ")
+
+  return (
+    <section className="grid gap-3 rounded-lg border p-3" aria-label="Phân đoạn BEV">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Phân đoạn BEV</p>
+          <p className="text-xs text-muted-foreground">
+            Mặt bằng nhìn từ trên xuống · ngưỡng thông thoáng{" "}
+            {formatPercentage(data.minimumRequiredRatio)}
+          </p>
+        </div>
+        <Badge variant={data.canPass ? "default" : "destructive"}>
+          {data.canPass ? (
+            <CircleCheckIcon data-icon="inline-start" />
+          ) : (
+            <TriangleAlertIcon data-icon="inline-start" />
+          )}
+          {data.canPass ? "Có thể đi qua" : "Bị chặn"}
+        </Badge>
+      </div>
+
+      {orderedZones.length ? (
+        <figure className="mx-auto grid w-full max-w-sm gap-2">
+          <figcaption className="sr-only">
+            Sơ đồ hành lang BEV gồm {orderedZones.length} đoạn từ lối vào đến lối ra.
+          </figcaption>
+          <div className="flex items-center justify-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <span>Lối vào</span>
+            <ArrowDownIcon className="size-3.5" aria-hidden="true" />
+          </div>
+
+          <div className="relative px-4">
+            <div
+              className="absolute inset-y-0 left-1.5 w-1 rounded-full bg-muted-foreground/25"
+              aria-hidden="true"
+            />
+            <div
+              className="absolute inset-y-0 right-1.5 w-1 rounded-full bg-muted-foreground/25"
+              aria-hidden="true"
+            />
+            <div
+              className="grid h-96 overflow-hidden border-2 bg-muted/20"
+              style={{ gridTemplateRows: zoneRows }}
+              role="group"
+              aria-label={`Hành lang có ${orderedZones.length} đoạn; ${data.blockedZoneIndices.length} đoạn bị chặn`}
+            >
+              {orderedZones.map((zone) => (
+                <Tooltip key={zone.index}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={`Đoạn ${zone.index}: ${formatPercentage(zone.freeRatio)} trống, ${formatPercentage(zone.occupancyRatio)} chiếm dụng, ${zone.blocked ? "bị chặn" : "đạt ngưỡng"}`}
+                        className={
+                          zone.blocked
+                            ? "flex min-h-0 w-full cursor-default items-center justify-between gap-2 border-b border-destructive/30 bg-destructive/15 px-3 text-left text-destructive outline-none last:border-b-0 hover:bg-destructive/20 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring"
+                            : "flex min-h-0 w-full cursor-default items-center justify-between gap-2 border-b border-emerald-500/25 bg-emerald-500/10 px-3 text-left text-emerald-800 outline-none last:border-b-0 hover:bg-emerald-500/15 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-300"
+                        }
+                      >
+                        {showZoneLabels ? (
+                          <>
+                            <span className="truncate text-xs font-medium">
+                              Đoạn {zone.index}
+                            </span>
+                            <span className="shrink-0 text-xs font-semibold tabular-nums">
+                              {formatPercentage(zone.freeRatio)} trống
+                            </span>
+                          </>
+                        ) : (
+                          <span className="sr-only">
+                            Đoạn {zone.index}, {formatPercentage(zone.freeRatio)} trống
+                          </span>
+                        )}
+                      </button>
+                    }
+                  />
+                  <TooltipContent>
+                    <span>
+                      <span className="font-medium">Đoạn {zone.index}</span>
+                      {" · "}
+                      {formatPercentage(zone.startRatio)}–{formatPercentage(zone.endRatio)}
+                      {" chiều dài · "}
+                      {formatPercentage(zone.freeRatio)} trống
+                      {" · "}
+                      {formatPercentage(zone.occupancyRatio)} chiếm dụng
+                    </span>
+                  </TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <ArrowDownIcon className="size-3.5" aria-hidden="true" />
+            <span>Lối ra</span>
+          </div>
+        </figure>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Chưa có dữ liệu phân đoạn từ backend.
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-3">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-emerald-500" />
+            Đạt ngưỡng
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-destructive" />
+            Bị chặn
+          </span>
+        </div>
+        <span className="tabular-nums">
+          Thấp nhất: {formatPercentage(data.minimumFreeRatio)}
+          {minimumZone ? ` tại đoạn ${minimumZone.index}` : ""}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Mỗi màu là trạng thái của một lát cắt; sơ đồ không thể hiện vị trí vật cản
+        theo chiều ngang.
+      </p>
+    </section>
+  )
+}
+
 function CameraResultCard({
   source,
   reading,
+  fps,
   processActive,
   connection,
 }: {
   source: OverviewSource
   reading: CorridorReading
+  fps?: number
   processActive: boolean
   connection: ConnectionState
 }) {
@@ -277,10 +577,13 @@ function CameraResultCard({
         : !streamConnected
           ? "secondary"
           : readingBadgeVariant(reading)
-  const zones =
+  const differenceZones =
     showReading && reading.status === "ok"
       ? reading.data?.differenceZones ?? []
       : []
+  const clearanceZoneOverlays = displayData?.zones.filter(
+    (zone) => zone.cameraPolygon.length >= 3
+  ) ?? []
   const polygon = source.baseline.roiPoints
 
   return (
@@ -314,13 +617,31 @@ function CameraResultCard({
             cameraName={source.camera.name}
             className="min-h-0"
           />
-          {polygon.length >= 3 || zones.length ? (
+          {polygon.length >= 3 ||
+          differenceZones.length ||
+          clearanceZoneOverlays.length ? (
             <svg
               viewBox="0 0 1 1"
               preserveAspectRatio="none"
               className="pointer-events-none absolute inset-0 z-20 size-full rounded-xl"
-              aria-label={`${zones.length} vùng sai khác với baseline`}
+              role="img"
+              aria-label={`${clearanceZoneOverlays.length} đoạn hành lang và ${differenceZones.length} vùng sai khác với baseline`}
             >
+              {clearanceZoneOverlays.map((zone) => (
+                <polygon
+                  key={`clearance-zone-${zone.index}`}
+                  points={zone.cameraPolygon
+                    .map(([xValue, yValue]) => `${xValue},${yValue}`)
+                    .join(" ")}
+                  className={
+                    zone.blocked
+                      ? "fill-destructive/20 stroke-destructive"
+                      : "fill-emerald-500/5 stroke-emerald-400/70"
+                  }
+                  strokeWidth={1.25}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
               {polygon.length >= 3 ? (
                 <polygon
                   points={polygon
@@ -332,7 +653,7 @@ function CameraResultCard({
                   vectorEffect="non-scaling-stroke"
                 />
               ) : null}
-              {zones.map((zone, index) => (
+              {differenceZones.map((zone, index) => (
                 <polygon
                   key={index}
                   points={zone.polygon
@@ -345,17 +666,41 @@ function CameraResultCard({
               ))}
             </svg>
           ) : null}
-          {zones.length ? (
+          {clearanceZoneOverlays.length <= 14
+            ? clearanceZoneOverlays
+                .filter((zone) => polygonHeight(zone.cameraPolygon) >= 0.025)
+                .map((zone) => {
+                  const [centerX, centerY] = polygonCenter(zone.cameraPolygon)
+                  return (
+                    <span
+                      key={`clearance-label-${zone.index}`}
+                      className={
+                        zone.blocked
+                          ? "pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-1/2 rounded-sm bg-destructive/85 px-1 py-0.5 text-[10px] font-medium leading-none text-destructive-foreground"
+                          : "pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-1/2 rounded-sm bg-background/80 px-1 py-0.5 text-[10px] font-medium leading-none text-foreground"
+                      }
+                      style={{
+                        left: `${centerX * 100}%`,
+                        top: `${centerY * 100}%`,
+                      }}
+                      aria-hidden="true"
+                    >
+                      Đ{zone.index}
+                    </span>
+                  )
+                })
+            : null}
+          {differenceZones.length ? (
             <Badge
               variant="destructive"
               className="pointer-events-none absolute right-3 top-3 z-30"
             >
-              {zones.length} vùng sai khác
+              {differenceZones.length} vùng sai khác
             </Badge>
           ) : null}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-lg border p-2.5">
             <p className="text-xs text-muted-foreground">Rộng đi qua</p>
             <p className="font-medium tabular-nums">
@@ -374,7 +719,15 @@ function CameraResultCard({
               {formatMeters(displayData?.bottleneckYMeters)}
             </p>
           </div>
+          <div className="rounded-lg border p-2.5">
+            <p className="text-xs text-muted-foreground">FPS xử lý</p>
+            <p className="font-medium tabular-nums">
+              {formatFps(displayData ? fps : undefined)}
+            </p>
+          </div>
         </div>
+
+        {displayData ? <ClearanceZonesPanel data={displayData} /> : null}
 
         {displayData?.freeXRangesMeters.length ? (
           <div className="grid gap-1.5">
@@ -414,8 +767,10 @@ export function OverviewDashboard({
 }) {
   const [processStatus, setProcessStatus] = useState(initialProcessStatus)
   const [readings, setReadings] = useState<Record<string, CorridorReading>>({})
+  const [cameraFps, setCameraFps] = useState<Record<string, number>>({})
   const [connection, setConnection] = useState<ConnectionState>("closed")
   const [pending, startTransition] = useTransition()
+  const fpsTrackerRef = useRef<CameraFpsTracker>({ samples: {}, values: {} })
   const processActive =
     processStatus.status === "starting" ||
     processStatus.status === "running" ||
@@ -500,6 +855,8 @@ export function OverviewDashboard({
       socket.onopen = () => {
         if (cancelled) return
         setConnection("open")
+        fpsTrackerRef.current = { samples: {}, values: {} }
+        setCameraFps({})
         setReadings(
           Object.fromEntries(
             (sourceKey ? sourceKey.split("|") : []).map((baselineId) => [
@@ -514,7 +871,15 @@ export function OverviewDashboard({
         requestInFlight = false
         try {
           const parsed = parseOverviewReadings(JSON.parse(String(event.data)))
-          if (parsed) setReadings(parsed)
+          if (parsed) {
+            const previousFps = fpsTrackerRef.current.values
+            const nextTracker = trackCameraFps(parsed, fpsTrackerRef.current)
+            fpsTrackerRef.current = nextTracker
+            if (nextTracker.values !== previousFps) {
+              setCameraFps(nextTracker.values)
+            }
+            setReadings(parsed)
+          }
         } catch {
           toast.error("WebSocket Overview trả dữ liệu không hợp lệ.")
         }
@@ -697,7 +1062,7 @@ export function OverviewDashboard({
                 Kết quả camera
               </h2>
               <p className="text-sm text-muted-foreground">
-                Video trực tiếp, vùng sai khác và độ rộng lối đi.
+                Video trực tiếp, FPS xử lý và độ thông thoáng theo từng đoạn BEV.
               </p>
             </div>
             <Badge variant="secondary">
@@ -711,6 +1076,7 @@ export function OverviewDashboard({
                 key={source.baseline.id}
                 source={source}
                 reading={readings[source.baseline.id] ?? { status: "warming_up" }}
+                fps={cameraFps[source.baseline.id]}
                 processActive={processActive}
                 connection={visibleConnection}
               />

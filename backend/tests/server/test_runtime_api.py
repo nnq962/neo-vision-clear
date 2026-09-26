@@ -155,6 +155,11 @@ class RuntimeApiTestCase(unittest.TestCase):
         self.assertEqual(response.json()["active_baseline_ids"], [])
         self.assertNotIn("inference_batch_size", response.json())
         self.assertEqual(response.json()["detection"]["noise_multiplier"], 6.0)
+        self.assertEqual(response.json()["detection"]["zone_count"], 10)
+        self.assertEqual(
+            response.json()["detection"]["minimum_zone_free_ratio"],
+            0.4,
+        )
         self.assertFalse(self.config_path.exists())
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -177,6 +182,8 @@ class RuntimeApiTestCase(unittest.TestCase):
                 "depth_alignment": True,
                 "alignment_inlier_ratio": 0.6,
                 "display_minimum_area_ratio": 0.002,
+                "zone_count": 12,
+                "minimum_zone_free_ratio": 0.45,
             },
         }
 

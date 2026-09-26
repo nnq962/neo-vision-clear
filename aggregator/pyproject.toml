@@ -1,0 +1,26 @@
+[project]
+name = "neo-vision-clear-aggregator"
+version = "0.2.0"
+description = "Aggregate corridor decisions from multiple Neo Vision Clear edge nodes"
+readme = "README.md"
+authors = [
+    { name = "Nguyen Ngoc Quyet", email = "quyet.nguyen.official@gmail.com" }
+]
+requires-python = ">=3.8"
+dependencies = [
+    "fastapi>=0.115,<0.124",
+    "uvicorn>=0.30,<0.34",
+    "websockets>=13,<14",
+]
+
+[project.scripts]
+aggregator-server = "neo_vision_clear_aggregator.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.12.16,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27,<0.29",
+]

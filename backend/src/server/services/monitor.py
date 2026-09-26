@@ -7,6 +7,7 @@ from pathlib import Path
 import threading
 from typing import Callable, Literal, Sequence
 
+from server.models.aggregator import CameraMeasurementMessage
 from server.models.calibration import CalibrationConfig
 from server.models.camera import CameraConfig
 from server.models.config import RuntimeConfig, RuntimeProcessResponse
@@ -27,6 +28,7 @@ from walkway_monitor.detection.zones import extract_difference_zones
 
 EstimatorFactory = Callable[..., DepthEstimator]
 PipelineFactory = Callable[..., CameraBatchDetectionPipeline]
+OutputPublisher = Callable[[CameraMeasurementMessage], None]
 RuntimeState = Literal["stopped", "starting", "running", "stopping", "failed"]
 
 
@@ -48,6 +50,7 @@ class MonitorService:
         settings: ServerSettings,
         estimator_factory: EstimatorFactory = DepthAnythingEstimator,
         pipeline_factory: PipelineFactory = CameraBatchDetectionPipeline,
+        output_publisher: OutputPublisher | None = None,
     ):
         """Lưu dependency và khởi tạo state worker ở trạng thái dừng."""
         settings.validate()
@@ -56,12 +59,14 @@ class MonitorService:
         self._snapshot_stores: dict[str, SnapshotStore] = {}
         self._estimator_factory = estimator_factory
         self._pipeline_factory = pipeline_factory
+        self._output_publisher = output_publisher
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._pipeline: CameraBatchDetectionPipeline | None = None
         self._state: RuntimeState = "stopped"
         self._active_baseline_ids: list[str] = []
+        self._active_cameras: tuple[CameraConfig, ...] = ()
         self._error: str | None = None
         self._started_at: datetime | None = None
         self._snapshot_max_age_seconds = settings.snapshot_max_age_seconds
@@ -103,6 +108,7 @@ class MonitorService:
             self._stop_event.clear()
             self._state = "starting"
             self._active_baseline_ids = [item.id for item in baseline_items]
+            self._active_cameras = camera_items
             self._error = None
             self._started_at = datetime.now(timezone.utc)
             self._snapshot_max_age_seconds = runtime.snapshot_max_age_seconds
@@ -117,6 +123,13 @@ class MonitorService:
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def set_output_publisher(self, publisher: OutputPublisher | None) -> None:
+        """Thay callback xuất kết quả mà không làm thay đổi worker runtime."""
+        # Bước 1: phép gán callback nguyên tử trên CPython và không giữ lock lâu.
+        self._output_publisher = publisher
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def stop(self, wait: bool = True) -> RuntimeProcessResponse:
         """Phát tín hiệu dừng; chỉ chờ có giới hạn khi shutdown application."""
         with self._lock:
@@ -125,6 +138,7 @@ class MonitorService:
             if thread is None or not thread.is_alive():
                 self._state = "stopped"
                 self._active_baseline_ids = []
+                self._active_cameras = ()
                 self._error = None
                 for store in self._snapshot_stores.values():
                     store.reset()
@@ -260,6 +274,7 @@ class MonitorService:
                 if self._stop_event.is_set():
                     self._state = "stopped"
                     self._active_baseline_ids = []
+                    self._active_cameras = ()
                     for store in self._snapshot_stores.values():
                         store.reset()
                     self._snapshot_stores = {}
@@ -279,6 +294,11 @@ class MonitorService:
                 return
             baseline_id = self._active_baseline_ids[camera_index]
             store = self._snapshot_stores.get(baseline_id)
+            camera = (
+                self._active_cameras[camera_index]
+                if camera_index < len(self._active_cameras)
+                else None
+            )
         if store is None:
             return
 
@@ -289,6 +309,12 @@ class MonitorService:
             maximum_vertices=32,
         )
         store.publish(output.snapshot, zones)
+
+        # Bước 3: publisher chỉ nhận JSON gọn và không được chặn pipeline.
+        if self._output_publisher is not None and camera is not None:
+            self._output_publisher(
+                CameraMeasurementMessage.from_snapshot(camera, output.snapshot)
+            )
 
     # ─────────────────────────────────────────────────────────────────────────
 

@@ -92,7 +92,9 @@ function mapBaseline(payload: BaselineApiPayload): BaselineConfig {
   }
 }
 
-function mapRunStatus(value: unknown): CalibrationRunStatus | undefined {
+export function mapCalibrationRunStatus(
+  value: unknown
+): CalibrationRunStatus | undefined {
   if (typeof value !== "object" || value === null) return undefined
   const payload = value as Record<string, unknown>
   const status = payload.status
@@ -119,6 +121,21 @@ function mapRunStatus(value: unknown): CalibrationRunStatus | undefined {
       typeof payload.alignment_median_error === "number"
         ? payload.alignment_median_error
         : undefined,
+  }
+}
+
+export async function getCalibrationRunStatus(
+  baselineId: string
+): Promise<CalibrationRunStatus | undefined> {
+  try {
+    const response = await fetch(
+      `/api/calibration/${encodeURIComponent(baselineId)}/status`,
+      { cache: "no-store" }
+    )
+    if (!response.ok) return undefined
+    return mapCalibrationRunStatus(await response.json())
+  } catch {
+    return undefined
   }
 }
 
@@ -150,20 +167,7 @@ export async function getBaselineArtifactAvailability(
 export async function getCalibrationRunStatuses(
   baselineIds: string[]
 ): Promise<Record<string, CalibrationRunStatus>> {
-  const statuses = await Promise.all(
-    baselineIds.map(async (baselineId) => {
-      try {
-        const response = await fetch(
-          `/api/calibration/${encodeURIComponent(baselineId)}/status`,
-          { cache: "no-store" }
-        )
-        if (!response.ok) return undefined
-        return mapRunStatus(await response.json())
-      } catch {
-        return undefined
-      }
-    })
-  )
+  const statuses = await Promise.all(baselineIds.map(getCalibrationRunStatus))
   return Object.fromEntries(
     statuses
       .filter((status): status is CalibrationRunStatus => status !== undefined)

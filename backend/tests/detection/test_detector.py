@@ -54,7 +54,7 @@ def make_baseline(with_world_coordinates: bool = True) -> BaselineArtifact:
 
 
 class WalkwayAnalyzerTestCase(unittest.TestCase):
-    """Kiểm tra analyzer trả mask và phép đo mà không kết luận trạng thái."""
+    """Kiểm tra analyzer trả mask, phép đo và kết luận tỷ lệ trống."""
 
     def setUp(self) -> None:
         """Tạo baseline và analyzer dùng chung cho từng test."""
@@ -258,6 +258,30 @@ class WalkwayAnalyzerTestCase(unittest.TestCase):
         encoded = json.dumps(payload)
 
         self.assertIn("maximum_passable_width_meters", encoded)
+        self.assertEqual(len(payload["zones"]), 10)
+        self.assertEqual(payload["zones"][0]["occupancy_ratio"], 0.0)
+        self.assertTrue(
+            all(
+                len(zone["camera_polygon"]) >= 3
+                for zone in payload["zones"]
+            )
+        )
+        self.assertTrue(
+            all(
+                0.0 <= coordinate <= 1.0
+                for zone in payload["zones"]
+                for point in zone["camera_polygon"]
+                for coordinate in point
+            )
+        )
+        first_zone_y = max(
+            point[1] for point in payload["zones"][0]["camera_polygon"]
+        )
+        last_zone_y = min(
+            point[1] for point in payload["zones"][-1]["camera_polygon"]
+        )
+        self.assertLess(first_zone_y, last_zone_y)
+        self.assertTrue(payload["can_pass"])
         self.assertIsInstance(
             payload["bottleneck"]["free_x_ranges_meters"],
             list,

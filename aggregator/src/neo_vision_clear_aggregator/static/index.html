@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#08110f" />
+    <title>Neo Vision Aggregator</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="Neo Vision Aggregator">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>
+            <strong>NEO VISION</strong>
+            <small>Aggregator</small>
+          </span>
+        </a>
+
+        <nav class="nav" aria-label="Điều hướng">
+          <button class="nav-item active" type="button" data-view="status">
+            <span class="nav-icon">◫</span>
+            Trạng thái
+          </button>
+          <button class="nav-item" type="button" data-view="config">
+            <span class="nav-icon">⌁</span>
+            Cấu hình
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="live-indicator">
+            <span class="pulse"></span>
+            <span>
+              <small>Dịch vụ</small>
+              <strong id="service-status">Đang kết nối</strong>
+            </span>
+          </div>
+          <div class="version">Schema v1 · Aggregator v0.2</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="page-eyebrow">GIÁM SÁT THỜI GIAN THỰC</p>
+            <h1 id="page-title">Trạng thái hành lang</h1>
+          </div>
+          <div class="topbar-actions">
+            <div class="last-update">
+              <small>Cập nhật cuối</small>
+              <strong id="last-update">--:--:--</strong>
+            </div>
+            <button class="icon-button" id="refresh-button" type="button" title="Làm mới">
+              ↻
+            </button>
+          </div>
+        </header>
+
+        <section id="status-view" class="view active">
+          <div class="summary-grid">
+            <article class="summary-card decision-card" id="decision-card">
+              <div class="summary-icon" id="decision-icon">?</div>
+              <div>
+                <span class="summary-label">Kết luận hành lang</span>
+                <strong class="summary-value" id="decision-state">ĐANG TẢI</strong>
+                <small id="decision-subtitle">Đang lấy dữ liệu mới nhất</small>
+              </div>
+            </article>
+            <article class="summary-card">
+              <div class="summary-icon cyan">J</div>
+              <div>
+                <span class="summary-label">Jetson kết nối</span>
+                <strong class="summary-value" id="source-count">0 / 0</strong>
+                <small id="message-count">0 message đã nhận</small>
+              </div>
+            </article>
+            <article class="summary-card">
+              <div class="summary-icon violet">C</div>
+              <div>
+                <span class="summary-label">Camera sẵn sàng</span>
+                <strong class="summary-value" id="camera-count">0 / 0</strong>
+                <small id="camera-subtitle">Chưa có cấu hình</small>
+              </div>
+            </article>
+            <article class="summary-card">
+              <div class="summary-icon amber">↗</div>
+              <div>
+                <span class="summary-label">WS server đích</span>
+                <strong class="summary-value" id="outbound-state">ĐÃ TẮT</strong>
+                <small id="outbound-subtitle">Chưa bật outbound</small>
+              </div>
+            </article>
+          </div>
+
+          <div class="content-grid">
+            <section class="panel cameras-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">DỮ LIỆU ĐẦU VÀO</p>
+                  <h2>Luồng camera</h2>
+                </div>
+                <span class="chip" id="required-width-chip">Yêu cầu -- cm</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vị trí</th>
+                      <th>Camera / nguồn</th>
+                      <th>Trạng thái</th>
+                      <th>Độ rộng tối đa</th>
+                      <th>Vùng tắc</th>
+                      <th>Tuổi dữ liệu</th>
+                    </tr>
+                  </thead>
+                  <tbody id="camera-table-body">
+                    <tr><td colspan="6" class="empty-cell">Đang tải camera…</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="panel decision-panel">
+              <div class="panel-head compact">
+                <div>
+                  <p class="panel-kicker">QUYẾT ĐỊNH</p>
+                  <h2 id="corridor-name">Hành lang</h2>
+                </div>
+                <span class="state-badge unknown" id="decision-badge">UNKNOWN</span>
+              </div>
+              <div class="decision-visual" id="decision-visual">
+                <div class="route-line"></div>
+                <div class="route-node">A</div>
+                <div class="route-track" id="route-track"></div>
+                <div class="route-node">B</div>
+              </div>
+              <div id="decision-details" class="detail-list"></div>
+            </aside>
+          </div>
+
+          <div class="content-grid lower-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">KẾT NỐI EDGE</p>
+                  <h2>Nguồn Jetson</h2>
+                </div>
+              </div>
+              <div id="source-list" class="source-list">
+                <div class="empty-state">Chưa có Jetson kết nối</div>
+              </div>
+            </section>
+
+            <section class="panel transport-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">TRANSPORT DEBUG</p>
+                  <h2>Dữ liệu gần nhất</h2>
+                </div>
+                <div class="segmented" role="tablist">
+                  <button class="active" type="button" data-json-tab="received">Nhận</button>
+                  <button type="button" data-json-tab="sent">Gửi</button>
+                </div>
+              </div>
+              <div class="json-toolbar" id="received-toolbar">
+                <label for="source-select">Nguồn</label>
+                <select id="source-select"></select>
+              </div>
+              <pre class="json-view" id="json-view">Chưa có dữ liệu.</pre>
+            </section>
+          </div>
+        </section>
+
+        <section id="config-view" class="view">
+          <form id="config-form">
+            <div class="config-grid">
+              <section class="panel form-panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">THÔNG TIN CHUNG</p>
+                    <h2>Hành lang</h2>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Corridor ID</span>
+                    <input id="corridor-id" required maxlength="100" autocomplete="off" />
+                    <small>Định danh ổn định gửi tới server.</small>
+                  </label>
+                  <label class="field">
+                    <span>Tên hành lang</span>
+                    <input id="corridor-name-input" required maxlength="200" autocomplete="off" />
+                    <small>Tên hiển thị cho người vận hành.</small>
+                  </label>
+                  <label class="field full">
+                    <span>Độ rộng robot yêu cầu</span>
+                    <div class="input-unit">
+                      <input id="required-width" type="number" min="0.1" step="0.1" required />
+                      <span>cm</span>
+                    </div>
+                    <small>Camera thấp hơn ngưỡng này sẽ làm hành lang bị chặn.</small>
+                  </label>
+                </div>
+              </section>
+
+              <section class="panel form-panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">ĐẦU RA</p>
+                    <h2>WS server đích</h2>
+                  </div>
+                  <label class="switch">
+                    <input id="outbound-enabled" type="checkbox" />
+                    <span></span>
+                    <em>Bật gửi</em>
+                  </label>
+                </div>
+                <div class="form-grid">
+                  <label class="field full">
+                    <span>WebSocket URL</span>
+                    <input id="outbound-url" type="url" placeholder="ws://server:9000/ws/corridor-status" />
+                    <small>Hỗ trợ ws:// và wss://. Aggregator tự reconnect khi mất mạng.</small>
+                  </label>
+                  <label class="field full">
+                    <span>Thời gian reconnect</span>
+                    <div class="input-unit">
+                      <input id="reconnect-seconds" type="number" min="0.1" step="0.1" required />
+                      <span>giây</span>
+                    </div>
+                  </label>
+                </div>
+              </section>
+            </div>
+
+            <section class="panel form-panel camera-config-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">ÁNH XẠ VỊ TRÍ</p>
+                  <h2>Camera trong hành lang</h2>
+                </div>
+                <button class="secondary-button" id="add-camera" type="button">＋ Thêm camera</button>
+              </div>
+              <p class="section-note">
+                Thứ tự được tính từ đầu đến cuối hành lang. Camera ID phải trùng ID trên backend Jetson.
+              </p>
+              <div id="camera-config-list" class="camera-config-list"></div>
+            </section>
+
+            <div class="save-bar">
+              <div>
+                <strong>Lưu và áp dụng ngay</strong>
+                <small>Luồng nhận và WS outbound sẽ dùng cấu hình mới mà không restart.</small>
+              </div>
+              <button class="primary-button" id="save-config" type="submit">
+                <span class="button-label">Lưu cấu hình</span>
+                <span class="button-spinner" aria-hidden="true"></span>
+              </button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <template id="camera-row-template">
+      <div class="camera-config-row">
+        <div class="drag-order" title="Thứ tự camera"><span class="order-number">1</span></div>
+        <label class="field">
+          <span>Camera ID</span>
+          <input data-field="camera_id" required maxlength="100" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Jetson source ID</span>
+          <input data-field="source_id" required maxlength="100" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" autocomplete="off" />
+        </label>
+        <label class="field location-field">
+          <span>Tên vị trí</span>
+          <input data-field="location_name" required maxlength="200" autocomplete="off" />
+        </label>
+        <div class="row-actions">
+          <button type="button" data-action="up" title="Di chuyển lên">↑</button>
+          <button type="button" data-action="down" title="Di chuyển xuống">↓</button>
+          <button class="danger" type="button" data-action="remove" title="Xóa camera">×</button>
+        </div>
+      </div>
+    </template>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

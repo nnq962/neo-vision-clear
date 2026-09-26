@@ -13,18 +13,33 @@ const nextConfig: NextConfig = {
   ...(isDevelopment && lanIp ? { allowedDevOrigins: [lanIp] } : {}),
   ...(isDevelopment
     ? {
+        skipTrailingSlashRedirect: true,
         async rewrites() {
           const rules = [
             {
-              source: "/webrtc/:path*/",
-              destination: `${mediaMtxUrl}/:path*/`,
+              source: "/:cameraId/whep/:sessionId",
+              destination: `${mediaMtxUrl}/:cameraId/whep/:sessionId`,
+            },
+            {
+              source: "/webrtc/:cameraId/",
+              destination: `${mediaMtxUrl}/:cameraId/`,
+            },
+            {
+              source: "/webrtc/:path*",
+              destination: `${mediaMtxUrl}/:path*`,
             },
           ];
           if (backendUrl) {
-            rules.unshift({
-              source: "/api/:path*/",
-              destination: `${backendUrl}/api/:path*`,
-            });
+            rules.unshift(
+              {
+                source: "/api/:path*",
+                destination: `${backendUrl}/api/:path*`,
+              },
+              {
+                source: "/ws/:path*",
+                destination: `${backendUrl}/ws/:path*`,
+              },
+            );
           }
           return rules;
         },

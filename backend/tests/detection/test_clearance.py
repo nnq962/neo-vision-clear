@@ -9,6 +9,7 @@ import numpy as np
 from walkway_monitor.detection.components import (
     filter_components_by_area,
     measure_route_capacity,
+    measure_zone_clearance,
 )
 
 
@@ -114,6 +115,66 @@ class RouteCapacityTestCase(unittest.TestCase):
         entrance[0] = roi[0]
         exit_mask[-1] = roi[-1]
         return entrance, exit_mask
+
+
+class ZoneClearanceTestCase(unittest.TestCase):
+    """Kiểm tra phép đo tổng khoảng trống theo từng đoạn hành lang."""
+
+    def test_one_blocked_zone_blocks_entire_corridor(self) -> None:
+        """Một đoạn còn 20 phần trăm phải chặn toàn bộ kết quả hành lang."""
+        roi = np.full((100, 20), 255, dtype=np.uint8)
+        obstacle = np.zeros_like(roi)
+        obstacle[30:40, :16] = 255
+
+        clearance = measure_zone_clearance(
+            obstacle,
+            roi,
+            zone_count=10,
+            minimum_free_ratio=0.4,
+        )
+
+        self.assertEqual(len(clearance.zones), 10)
+        self.assertEqual(clearance.zones[3].index, 4)
+        self.assertAlmostEqual(clearance.zones[3].free_ratio, 0.2)
+        self.assertAlmostEqual(clearance.zones[3].occupancy_ratio, 0.8)
+        self.assertTrue(clearance.zones[3].blocked)
+        self.assertEqual(clearance.blocked_zone_indices, (4,))
+        self.assertAlmostEqual(clearance.minimum_free_ratio, 0.2)
+        self.assertFalse(clearance.can_pass)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_disconnected_gaps_are_summed_within_each_slice(self) -> None:
+        """Hai khoảng trống 20 phần trăm phải tạo tổng tỷ lệ trống 40 phần trăm."""
+        roi = np.full((50, 20), 255, dtype=np.uint8)
+        obstacle = np.zeros_like(roi)
+        obstacle[:, 4:16] = 255
+
+        clearance = measure_zone_clearance(
+            obstacle,
+            roi,
+            zone_count=5,
+            minimum_free_ratio=0.4,
+        )
+
+        self.assertTrue(clearance.can_pass)
+        self.assertTrue(all(not zone.blocked for zone in clearance.zones))
+        for zone in clearance.zones:
+            self.assertAlmostEqual(zone.free_ratio, 0.4)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_zone_count_cannot_exceed_valid_bev_rows(self) -> None:
+        """Cấu hình nhiều đoạn hơn số hàng BEV phải bị từ chối rõ ràng."""
+        roi = np.full((4, 10), 255, dtype=np.uint8)
+
+        with self.assertRaisesRegex(ValueError, "Số đoạn"):
+            measure_zone_clearance(
+                np.zeros_like(roi),
+                roi,
+                zone_count=5,
+                minimum_free_ratio=0.4,
+            )
 
 
 if __name__ == "__main__":

@@ -66,6 +66,11 @@ export async function saveRuntimeConfig(
         formData,
         "display_minimum_area_ratio"
       ),
+      zoneCount: readNumber(formData, "zone_count"),
+      minimumZoneFreeRatio: readNumber(
+        formData,
+        "minimum_zone_free_ratio"
+      ),
     },
   }
   const numericValues = [
@@ -101,6 +106,8 @@ export async function saveRuntimeConfig(
       alignment_inlier_ratio: runtime.detection.alignmentInlierRatio,
       display_minimum_area_ratio:
         runtime.detection.displayMinimumAreaRatio,
+      zone_count: runtime.detection.zoneCount,
+      minimum_zone_free_ratio: runtime.detection.minimumZoneFreeRatio,
     },
   }
 

@@ -15,6 +15,8 @@ type RuntimeApiPayload = {
     depth_alignment: boolean
     alignment_inlier_ratio: number
     display_minimum_area_ratio: number
+    zone_count: number
+    minimum_zone_free_ratio: number
   }
 }
 
@@ -46,6 +48,8 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
     depthAlignment: true,
     alignmentInlierRatio: 0.55,
     displayMinimumAreaRatio: 0.001,
+    zoneCount: 10,
+    minimumZoneFreeRatio: 0.4,
   },
 }
 
@@ -71,7 +75,9 @@ function isRuntimeApiPayload(value: unknown): value is RuntimeApiPayload {
     typeof detector.check_area_padding === "number" &&
     typeof detector.depth_alignment === "boolean" &&
     typeof detector.alignment_inlier_ratio === "number" &&
-    typeof detector.display_minimum_area_ratio === "number"
+    typeof detector.display_minimum_area_ratio === "number" &&
+    typeof detector.zone_count === "number" &&
+    typeof detector.minimum_zone_free_ratio === "number"
   )
 }
 
@@ -135,6 +141,8 @@ export function mapRuntimeConfig(payload: RuntimeApiPayload): RuntimeConfig {
       alignmentInlierRatio: payload.detection.alignment_inlier_ratio,
       displayMinimumAreaRatio:
         payload.detection.display_minimum_area_ratio,
+      zoneCount: payload.detection.zone_count,
+      minimumZoneFreeRatio: payload.detection.minimum_zone_free_ratio,
     },
   }
 }

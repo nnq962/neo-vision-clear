@@ -52,6 +52,7 @@ import type {
   CalibrationRunStatus,
 } from "@/lib/types/calibration"
 import type { CameraIdentity } from "@/lib/types/camera"
+import { getCalibrationRunStatus } from "@/lib/server/calibrations"
 
 import { deleteBaseline, saveAndStartBaseline } from "./actions"
 
@@ -85,23 +86,6 @@ type CalibrationDraft = {
   inputSize: string
   processWidth: string
   worldPoints: [string, string][]
-}
-
-function isCalibrationRunStatus(
-  value: unknown
-): value is CalibrationRunStatus {
-  if (typeof value !== "object" || value === null) return false
-  const payload = value as Record<string, unknown>
-  return (
-    typeof payload.baselineId === "string" &&
-    (payload.status === "idle" ||
-      payload.status === "running" ||
-      payload.status === "completed" ||
-      payload.status === "failed") &&
-    typeof payload.processedFrames === "number" &&
-    typeof payload.totalFrames === "number" &&
-    typeof payload.artifactAvailable === "boolean"
-  )
 }
 
 function createEmptyDraft(fallbackNumber: number): CalibrationDraft {
@@ -299,19 +283,7 @@ export function CalibrationPageContent({
     const poll = async () => {
       if (document.hidden) return
       const results = await Promise.all(
-        runningIds.map(async (baselineId) => {
-          try {
-            const response = await fetch(
-              `/api/calibration/${encodeURIComponent(baselineId)}/status`,
-              { cache: "no-store" }
-            )
-            if (!response.ok) return undefined
-            const status: unknown = await response.json()
-            return isCalibrationRunStatus(status) ? status : undefined
-          } catch {
-            return undefined
-          }
-        })
+        runningIds.map(getCalibrationRunStatus)
       )
       if (cancelled) return
       for (const result of results) {

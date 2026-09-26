@@ -157,7 +157,8 @@ Cửa sổ debug hiển thị theo lưới 2x2:
 - Vạch cam đánh dấu nút thắt trên tuyến trống liên thông từ đầu tới cuối hành lang.
 - Depth thô và depth sau robust alignment ở hàng dưới, dùng cùng dải màu cố định
   theo baseline. Panel cuối hiển thị `scale`, `shift` và tỷ lệ pixel dùng để fit.
-- Panel BEV liệt kê từng dòng số đo theo mét; module không kết luận lối đi trống hay bị chặn.
+- Panel BEV liệt kê từng dòng số đo theo mét; kết quả API còn chia BEV thành
+  các đoạn dọc để kết luận `can_pass` theo tỷ lệ trống thấp nhất.
 
 Hai heatmap được bật mặc định. Có thể ẩn hàng heatmap để cửa sổ chỉ còn camera và BEV:
 
@@ -198,6 +199,8 @@ FPS=18.62 | inference=42.1ms | analysis=3.4ms | render=0.0ms | bề rộng đi x
 | `--noise-multiplier` | `6.0` | Nhân noise map của baseline để tạo threshold từng pixel |
 | `--minimum-difference` | `0.03` | Ngưỡng depth gần hơn baseline tối thiểu |
 | `--bev-pixels-per-meter` | `100` | Raster BEV dùng 100 pixel cho mỗi mét khi đo bề rộng |
+| `--zone-count` | `10` | Chia chiều dài hành lang BEV thành 10 đoạn bằng nhau |
+| `--minimum-zone-free-ratio` | `0.4` | Mỗi đoạn phải còn ít nhất 40% tổng bề rộng trống |
 | `--depth-blur-kernel` | `5` | Làm mượt depth trước khi so sánh |
 | `--check-area-padding` | `12` | Mở rộng ROI 12 pixel để so sánh và làm sạch mask |
 | `--no-depth-alignment` | Tắt | Bỏ căn chỉnh và so sánh trực tiếp depth raw với baseline |
@@ -207,10 +210,16 @@ FPS=18.62 | inference=42.1ms | analysis=3.4ms | render=0.0ms | bề rộng đi x
 Mask thô chỉ lấy depth gần camera hơn baseline trong check area. Sau morphology, mask được
 cắt về ROI, loại component nhỏ rồi chiếu sang raster BEV theo tọa độ thực. Analyzer co vùng
 trống theo từng bề rộng footprint ứng viên và kiểm tra connected component có nối từ đầu tới
-cuối hành lang hay không. Kết quả là `maximum_passable_width_meters`, vị trí Y của nút thắt
-và các khoảng X còn trống tại đó. Module chỉ trả số đo; hệ thống nhận dữ liệu tự áp dụng quy
-tắc kết luận. Baseline không có `world_coordinates` sẽ bị từ chối thay vì trả số đo pixel dễ
-gây hiểu nhầm. Camera phải giữ nguyên vị trí.
+cuối hành lang hay không. Kết quả cũ `maximum_passable_width_meters`, vị trí Y của nút thắt
+và các khoảng X còn trống tại đó vẫn được giữ để tương thích.
+
+Logic MVP chia các hàng hợp lệ của BEV thành `zone_count` đoạn dọc. Tại mỗi lát cắt ngang,
+mọi pixel trống được cộng lại, kể cả khi chúng nằm ở hai khoảng rời nhau. Tỷ lệ của một đoạn
+là lát cắt có tỷ lệ trống thấp nhất trong đoạn; chỉ cần một đoạn thấp hơn
+`minimum_zone_free_ratio` thì `can_pass=false`. Cách tính này cố ý chỉ dùng phần trăm tổng
+khoảng trống, chưa bảo đảm các khoảng trống rời nhau đủ rộng cho footprint robot.
+Baseline không có `world_coordinates` sẽ bị từ chối thay vì trả số đo pixel dễ gây hiểu nhầm.
+Camera phải giữ nguyên vị trí.
 
 ## FastAPI server và WebSocket
 
@@ -267,7 +276,9 @@ trỏ tới một baseline và camera tương ứng; không cần lặp URL ho�
       "check_area_padding": 12,
       "depth_alignment": true,
       "alignment_inlier_ratio": 0.55,
-      "display_minimum_area_ratio": 0.001
+      "display_minimum_area_ratio": 0.001,
+      "zone_count": 10,
+      "minimum_zone_free_ratio": 0.4
     }
   }
 }
@@ -316,37 +327,35 @@ số lõi CPU, xung GPU (MHz), nhiệt độ CPU/GPU (°C) và RAM dùng/khả d
 Tải CPU cần hai lần lấy mẫu để tính delta; cảm biến không có trên hệ thống được
 trả về `null` thay vì làm lỗi API.
 
-Robot kết nối tới `ws://<host>:8000/ws/corridor` và gửi:
+Protocol robot request-response tại `/ws/corridor` đã được bỏ. Mỗi backend Jetson
+giờ chủ động giữ một kết nối tới Aggregator và push kết quả mới nhất của từng
+camera. Khai báo trong `.env` hoặc environment của container:
 
-```json
-{"type": "get_corridor_info", "request_id": "req-01"}
+```env
+NVC_JETSON_ID=jetson-a
+NVC_AGGREGATOR_WS_BASE_URL=ws://192.168.1.100:8100/ws/ingest
+NVC_AGGREGATOR_RECONNECT_SECONDS=2
 ```
 
-Server trả dữ liệu mới nhất và giữ nguyên `request_id`:
+Backend tự nối `NVC_JETSON_ID` vào URL thành
+`ws://192.168.1.100:8100/ws/ingest/jetson-a`, tự reconnect và dùng hàng đợi
+latest-wins theo `camera_id`. Nếu URL để trống, publisher được tắt mà không ảnh
+hưởng detection. Payload không còn `frame_index`:
 
 ```json
 {
-  "type": "corridor_info",
-  "request_id": "req-01",
-  "status": "ok",
-  "age_ms": 24,
-  "data": {
-    "maximum_passable_width_meters": 0.82,
-    "walkway_width_meters": 1.75,
-    "bottleneck": {
-      "y_meters": 2.35,
-      "free_x_ranges_meters": [[0.0, 0.82]]
-    },
-    "frame_index": 120,
-    "captured_at": 1789119256.74
-  },
-  "error": null
+  "schema_version": 1,
+  "camera_id": "camera-03",
+  "camera_name": "Camera 3",
+  "state": "blocked",
+  "zone_count": 10,
+  "blocked_zones": [4, 5],
+  "minimum_free_ratio": 0.18,
+  "max_passable_width_cm": 18,
+  "reason": "insufficient_clearance",
+  "observed_at": "2026-09-26T10:30:12.450Z"
 }
 ```
-
-`status` có thể là `ok`, `warming_up`, `stale` hoặc `error`. Đây chỉ là trạng
-thái của dữ liệu/camera; server không kết luận robot có đi qua được hay không.
-Endpoint `GET /health` cung cấp cùng trạng thái để health-check service.
 
 Dashboard dùng endpoint riêng `ws://<host>:8000/ws/overview` để nhận thêm vùng
 sai khác với baseline mà không làm tăng payload dành cho robot. Frontend gửi:
@@ -355,7 +364,8 @@ sai khác với baseline mà không làm tăng payload dành cho robot. Frontend
 {"type": "get_overview_info", "request_id": "overview-01"}
 ```
 
-Response có các trường số đo giống `corridor_info` và bổ sung `changed_zones`:
+Response chứa số đo nội bộ, bổ sung `camera_polygon` cho từng đoạn và
+`changed_zones`:
 
 ```json
 {
@@ -369,6 +379,18 @@ Response có các trường số đo giống `corridor_info` và bổ sung `chan
       "y_meters": 2.35,
       "free_x_ranges_meters": [[0.0, 0.82]]
     },
+    "zones": [
+      {
+        "index": 1,
+        "name": "zone_1",
+        "start_ratio": 0.0,
+        "end_ratio": 0.1,
+        "free_ratio": 0.92,
+        "occupancy_ratio": 0.08,
+        "blocked": false,
+        "camera_polygon": [[0.31, 0.24], [0.69, 0.24], [0.72, 0.31], [0.28, 0.31]]
+      }
+    ],
     "frame_index": 120,
     "captured_at": 1789119256.74,
     "changed_zones": [
@@ -383,9 +405,11 @@ Response có các trường số đo giống `corridor_info` và bổ sung `chan
 ```
 
 Tọa độ polygon được chuẩn hóa theo chiều rộng và chiều cao frame về `[0, 1]`.
-Mỗi frame gửi tối đa 20 zone và 32 đỉnh mỗi zone; dashboard vẽ chúng bằng lớp
-SVG trong suốt trên video WebRTC. Khi runtime dừng hoặc chưa có snapshot, lớp
-overlay được xóa.
+`camera_polygon` được tính một lần bằng phép chiếu ngược từ BEV nên các đoạn xa
+và gần giữ đúng phối cảnh camera. Mỗi frame gửi tối đa 20 vùng sai khác và 32
+đỉnh mỗi vùng; dashboard vẽ cả phân đoạn lẫn vùng sai khác bằng lớp SVG trong
+suốt trên video WebRTC. Khi runtime dừng hoặc chưa có snapshot, lớp overlay được
+xóa.
 
 ## Kiểm thử
 

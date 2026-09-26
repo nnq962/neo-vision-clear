@@ -23,6 +23,9 @@ class ServerSettings:
     port: int = 8000
     snapshot_max_age_seconds: float = 2.0
     worker_shutdown_timeout_seconds: float = 7.0
+    jetson_id: str = "jetson-a"
+    aggregator_ws_base_url: str | None = None
+    aggregator_reconnect_seconds: float = 2.0
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -32,6 +35,7 @@ class ServerSettings:
         # Bước 1: camera và runtime nghiệp vụ nằm trong config JSON; biến môi
         # trường chỉ còn quản lý hạ tầng của chính process server.
         checkpoint = os.getenv("WALKWAY_CHECKPOINT") or None
+        aggregator_url = os.getenv("NVC_AGGREGATOR_WS_BASE_URL", "").strip()
         return cls(
             camera_config_path=os.getenv(
                 "NVC_CONFIG_PATH",
@@ -54,6 +58,11 @@ class ServerSettings:
             worker_shutdown_timeout_seconds=float(
                 os.getenv("WALKWAY_WORKER_SHUTDOWN_TIMEOUT_SECONDS", "7.0")
             ),
+            jetson_id=os.getenv("NVC_JETSON_ID", "jetson-a"),
+            aggregator_ws_base_url=aggregator_url or None,
+            aggregator_reconnect_seconds=float(
+                os.getenv("NVC_AGGREGATOR_RECONNECT_SECONDS", "2.0")
+            ),
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -72,3 +81,12 @@ class ServerSettings:
             raise ValueError("snapshot_max_age_seconds phải là số dương.")
         if self.worker_shutdown_timeout_seconds <= 0:
             raise ValueError("worker_shutdown_timeout_seconds phải là số dương.")
+        if not self.jetson_id.strip():
+            raise ValueError("jetson_id không được để trống.")
+        if self.aggregator_ws_base_url is not None:
+            if not self.aggregator_ws_base_url.startswith(("ws://", "wss://")):
+                raise ValueError(
+                    "aggregator_ws_base_url phải bắt đầu bằng ws:// hoặc wss://."
+                )
+        if self.aggregator_reconnect_seconds <= 0:
+            raise ValueError("aggregator_reconnect_seconds phải là số dương.")

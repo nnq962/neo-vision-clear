@@ -110,6 +110,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=100.0,
         help="Độ phân giải raster dùng để đo mask BEV.",
     )
+    detection_parser.add_argument(
+        "--zone-count",
+        type=int,
+        default=10,
+        help="Số đoạn bằng nhau theo chiều dọc của hành lang BEV.",
+    )
+    detection_parser.add_argument(
+        "--minimum-zone-free-ratio",
+        type=float,
+        default=0.4,
+        help="Tỷ lệ trống tối thiểu của mọi đoạn để đánh giá có thể đi qua.",
+    )
     detection_parser.add_argument("--depth-blur-kernel", type=int, default=5)
     detection_parser.add_argument(
         "--batch-size",
@@ -235,6 +247,8 @@ def run_detection(args: argparse.Namespace) -> int:
         depth_alignment=not args.no_depth_alignment,
         alignment_inlier_ratio=args.alignment_inlier_ratio,
         display_minimum_area_ratio=args.display_minimum_area_ratio,
+        zone_count=args.zone_count,
+        minimum_zone_free_ratio=args.minimum_zone_free_ratio,
     )
     config.validate()
     checkpoint = args.checkpoint or default_checkpoint_path(baseline.encoder)

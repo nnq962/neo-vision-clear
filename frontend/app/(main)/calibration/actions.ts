@@ -3,6 +3,7 @@ import type {
   CalibrationPoint,
   CalibrationRunStatus,
 } from "@/lib/types/calibration"
+import { mapCalibrationRunStatus } from "@/lib/server/calibrations"
 
 export type SaveBaselineState = {
   status: "idle" | "success" | "error"
@@ -131,37 +132,6 @@ function mapResponse(payload: Record<string, unknown>): BaselineConfig | undefin
   }
 }
 
-function mapRunResponse(
-  payload: Record<string, unknown>
-): CalibrationRunStatus | undefined {
-  const status = payload.status
-  if (
-    typeof payload.baseline_id !== "string" ||
-    (status !== "idle" &&
-      status !== "running" &&
-      status !== "completed" &&
-      status !== "failed") ||
-    typeof payload.processed_frames !== "number" ||
-    typeof payload.total_frames !== "number" ||
-    typeof payload.artifact_available !== "boolean"
-  ) {
-    return undefined
-  }
-  return {
-    baselineId: payload.baseline_id,
-    status,
-    processedFrames: payload.processed_frames,
-    totalFrames: payload.total_frames,
-    error: typeof payload.error === "string" ? payload.error : undefined,
-    artifactAvailable: payload.artifact_available,
-    noiseP99: typeof payload.noise_p99 === "number" ? payload.noise_p99 : undefined,
-    alignmentMedianError:
-      typeof payload.alignment_median_error === "number"
-        ? payload.alignment_median_error
-        : undefined,
-  }
-}
-
 export async function saveBaseline(
   _previousState: SaveBaselineState,
   formData: FormData
@@ -252,7 +222,7 @@ export async function startCalibration(
     if (typeof payload !== "object" || payload === null) {
       return { status: "error", message: "Backend trả trạng thái không hợp lệ." }
     }
-    const run = mapRunResponse(payload as Record<string, unknown>)
+    const run = mapCalibrationRunStatus(payload)
     if (!run) {
       return { status: "error", message: "Backend trả trạng thái không hợp lệ." }
     }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import time
 
 import cv2
@@ -14,6 +15,7 @@ from walkway_monitor.detection.components import (
     clean_changed_mask,
     filter_components_by_area,
     measure_route_capacity,
+    measure_zone_clearance,
 )
 from walkway_monitor.detection.models import (
     AnalysisDiagnostics,
@@ -101,6 +103,13 @@ class WalkwayAnalyzer:
         self._metric_bev = build_metric_bev_transform(
             baseline,
             config.bev_pixels_per_meter,
+        )
+        self._camera_zone_polygons = (
+            self._metric_bev.project_zone_polygons_to_camera(
+                config.zone_count,
+                baseline.frame_width,
+                baseline.frame_height,
+            )
         )
 
         # Bước 10: bắt đầu đánh số các depth map được process() xử lý từ 0.
@@ -196,6 +205,22 @@ class WalkwayAnalyzer:
             self._metric_bev.minimum_world_x,
             self._metric_bev.minimum_world_y,
         )
+        zone_clearance = measure_zone_clearance(
+            bev_changed_mask,
+            self._metric_bev.roi_mask,
+            self._config.zone_count,
+            self._config.minimum_zone_free_ratio,
+        )
+        zone_clearance = replace(
+            zone_clearance,
+            zones=tuple(
+                replace(
+                    zone,
+                    camera_polygon=self._camera_zone_polygons[index],
+                )
+                for index, zone in enumerate(zone_clearance.zones)
+            ),
+        )
         bev_seconds = time.perf_counter() - bev_started
 
         # Bước 9: tách snapshot nghiệp vụ khỏi chẩn đoán căn chỉnh nội bộ.
@@ -211,6 +236,7 @@ class WalkwayAnalyzer:
             ),
             frame_index=self._frame_index,
             captured_at=captured_at,
+            zone_clearance=zone_clearance,
         )
         diagnostics = AnalysisDiagnostics(
             alignment_scale=scale,
@@ -230,6 +256,7 @@ class WalkwayAnalyzer:
         return DetectionOutput(
             snapshot=snapshot,
             route_capacity=capacity,
+            zone_clearance=zone_clearance,
             diagnostics=diagnostics,
             timings=timings,
             raw_depth=depth,

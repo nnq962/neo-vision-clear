@@ -24,17 +24,29 @@ class SnapshotRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=64)
 
 
-class CorridorInfoRequest(SnapshotRequest):
-    """Yêu cầu lấy thông tin mới nhất của hành lang đang quan sát."""
-
-    type: Literal["get_corridor_info"]
-
-
 class BottleneckPayload(BaseModel):
     """Vị trí và các khoảng trống theo X tại nút thắt."""
 
     y_meters: float
     free_x_ranges_meters: list[tuple[float, float]]
+
+
+class ClearanceZonePayload(BaseModel):
+    """Phép đo tỷ lệ trống của một đoạn hành lang trên BEV."""
+
+    index: int = Field(ge=1)
+    name: str
+    start_ratio: float = Field(ge=0.0, le=1.0)
+    end_ratio: float = Field(ge=0.0, le=1.0)
+    free_ratio: float = Field(ge=0.0, le=1.0)
+    occupancy_ratio: float = Field(ge=0.0, le=1.0)
+    blocked: bool
+
+
+class OverviewClearanceZonePayload(ClearanceZonePayload):
+    """Phép đo một đoạn kèm polygon đã chiếu về ảnh camera."""
+
+    camera_polygon: list[NormalizedPoint] = Field(max_length=8)
 
 
 class CorridorInfoData(BaseModel):
@@ -43,6 +55,11 @@ class CorridorInfoData(BaseModel):
     maximum_passable_width_meters: float
     walkway_width_meters: float
     bottleneck: BottleneckPayload
+    zones: list[ClearanceZonePayload]
+    minimum_free_ratio: float = Field(ge=0.0, le=1.0)
+    minimum_required_ratio: float = Field(ge=0.0, le=1.0)
+    blocked_zone_indices: list[int]
+    can_pass: bool
     frame_index: int
     captured_at: float
 
@@ -53,22 +70,6 @@ class CorridorInfoData(BaseModel):
         """Chuyển snapshot miền nghiệp vụ thành schema response API."""
         # Dùng payload thuần Python của snapshot để tránh rò rỉ kiểu numpy.
         return cls.model_validate(snapshot.to_dict())
-
-
-class SnapshotResponse(BaseModel):
-    """Các trường trạng thái chung của phản hồi snapshot WebSocket."""
-
-    request_id: str
-    status: Literal["ok", "warming_up", "stale", "error"]
-    age_ms: int | None = None
-    error: str | None = None
-
-
-class CorridorInfoResponse(SnapshotResponse):
-    """Phản hồi phép đo cùng trạng thái độ mới của snapshot."""
-
-    type: Literal["corridor_info"] = "corridor_info"
-    data: CorridorInfoData | None = None
 
 
 class OverviewInfoRequest(SnapshotRequest):
@@ -87,6 +88,7 @@ class DifferenceZonePayload(BaseModel):
 class OverviewInfoData(CorridorInfoData):
     """Dữ liệu số đo mở rộng thêm zone phục vụ overlay video."""
 
+    zones: list[OverviewClearanceZonePayload]
     changed_zones: list[DifferenceZonePayload]
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -98,8 +100,9 @@ class OverviewInfoData(CorridorInfoData):
         zones: tuple[DifferenceZone, ...],
     ) -> "OverviewInfoData":
         """Ghép snapshot robot với polygon visualization thuần JSON."""
-        # Bước 1: tái sử dụng ánh xạ số đo và chỉ thêm payload zone đã giới hạn.
-        payload = CorridorInfoData.from_snapshot(snapshot).model_dump()
+        # Bước 1: dùng payload gốc để giữ camera_polygon chỉ dành cho overview;
+        # schema corridor vẫn bỏ field visualization này khỏi API robot.
+        payload = snapshot.to_dict()
         payload["changed_zones"] = [
             {
                 "polygon": list(zone.polygon),

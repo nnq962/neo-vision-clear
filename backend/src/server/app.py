@@ -14,6 +14,7 @@ from server.routes import (
     uart_router,
     websocket_router,
 )
+from server.services.aggregator_publisher import AggregatorPublisher
 from server.services.calibration import CalibrationService
 from server.services.camera_connection import CameraConnectionTester
 from server.services.config_store import ConfigStore
@@ -33,6 +34,7 @@ def create_app(
     camera_connection_tester: CameraConnectionTester | None = None,
     calibration_service: CalibrationService | None = None,
     uart_service: UartService | None = None,
+    aggregator_publisher: AggregatorPublisher | None = None,
 ) -> FastAPI:
     """Tạo FastAPI app với cấu hình và monitor factory có thể thay trong test."""
     # Bước 1: đọc và kiểm tra cấu hình trước khi dựng application.
@@ -49,6 +51,9 @@ def create_app(
         resolved_settings.camera_config_path,
     )
     application.state.config_store = resolved_config_store
+    application.state.aggregator_publisher = (
+        aggregator_publisher or AggregatorPublisher(resolved_settings)
+    )
     application.state.system_metrics_service = SystemMetricsService()
     application.state.camera_connection_tester = (
         camera_connection_tester or CameraConnectionTester()

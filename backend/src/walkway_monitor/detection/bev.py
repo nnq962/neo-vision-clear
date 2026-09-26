@@ -41,6 +41,102 @@ class MetricBevTransform:
         warped[self.roi_mask == 0] = 0
         return warped
 
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def project_zone_polygons_to_camera(
+        self,
+        zone_count: int,
+        frame_width: int,
+        frame_height: int,
+    ) -> tuple[tuple[tuple[float, float], ...], ...]:
+        """Chiếu polygon từng đoạn BEV về tọa độ chuẩn hóa của ảnh camera."""
+        if zone_count < 1:
+            raise ValueError("zone_count phải là số nguyên dương.")
+        if frame_width < 2 or frame_height < 2:
+            raise ValueError("Kích thước frame phải lớn hơn một pixel.")
+
+        # Bước 1: chia đúng các hàng BEV mà phép đo clearance đang sử dụng để
+        # đường biên overlay và kết quả nghiệp vụ không lệch đoạn nhau.
+        valid_rows = np.flatnonzero(np.any(self.roi_mask > 0, axis=1))
+        if valid_rows.size < zone_count:
+            raise ValueError(
+                "Số đoạn không được lớn hơn số lát cắt ngang hợp lệ của BEV."
+            )
+        row_groups = np.array_split(valid_rows, zone_count)
+        inverse_homography = np.linalg.inv(self.homography)
+        x_denominator = float(frame_width - 1)
+        y_denominator = float(frame_height - 1)
+
+        # Bước 2: lấy contour của phần ROI thuộc từng nhóm hàng. Cách này vẫn
+        # đúng với ROI hình thang hoặc cạnh vào/ra nghiêng trên raster BEV.
+        polygons: list[tuple[tuple[float, float], ...]] = []
+        for rows in row_groups:
+            zone_mask = np.zeros_like(self.roi_mask, dtype=np.uint8)
+            zone_mask[rows] = self.roi_mask[rows]
+            contours, _hierarchy = cv2.findContours(
+                zone_mask,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE,
+            )
+            if not contours:
+                raise ValueError("Không thể tạo polygon cho một đoạn BEV.")
+            contour = max(contours, key=cv2.contourArea)
+            hull = cv2.convexHull(contour)
+            perimeter = float(cv2.arcLength(hull, True))
+            simplified = hull
+            for epsilon_ratio in (0.002, 0.005, 0.01, 0.02, 0.04):
+                candidate = cv2.approxPolyDP(
+                    hull,
+                    max(perimeter * epsilon_ratio, 0.5),
+                    True,
+                )
+                simplified = candidate
+                if 3 <= len(candidate) <= 8:
+                    break
+
+            if len(simplified) > 8:
+                sample_indices = np.linspace(
+                    0,
+                    len(simplified) - 1,
+                    8,
+                    dtype=np.int32,
+                )
+                simplified = simplified[sample_indices]
+
+            # Một đoạn chỉ cao một pixel có thể bị OpenCV coi như đường thẳng.
+            # Mở rộng bounding box một pixel để vẫn tạo được tứ giác hợp lệ.
+            if len(simplified) < 3:
+                x_value, y_value, width, height = cv2.boundingRect(contour)
+                top = max(y_value - (1 if height == 1 else 0), 0)
+                bottom = min(y_value + max(height - 1, 1), self.roi_mask.shape[0] - 1)
+                right = min(x_value + max(width - 1, 1), self.roi_mask.shape[1] - 1)
+                simplified = np.array(
+                    [
+                        [[x_value, top]],
+                        [[right, top]],
+                        [[right, bottom]],
+                        [[x_value, bottom]],
+                    ],
+                    dtype=np.float32,
+                )
+
+            # Bước 3: chiếu ngược về pixel camera rồi chuẩn hóa để frontend có
+            # thể scale polygon trực tiếp theo kích thước video đang hiển thị.
+            bev_points = simplified.reshape(1, -1, 2).astype(np.float32)
+            camera_points = cv2.perspectiveTransform(
+                bev_points,
+                inverse_homography,
+            )[0]
+            polygon = tuple(
+                (
+                    float(np.clip(point[0] / x_denominator, 0.0, 1.0)),
+                    float(np.clip(point[1] / y_denominator, 0.0, 1.0)),
+                )
+                for point in camera_points
+            )
+            polygons.append(polygon)
+        return tuple(polygons)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 

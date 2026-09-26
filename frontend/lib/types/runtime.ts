@@ -8,6 +8,8 @@ export type RuntimeDetectionConfig = {
   depthAlignment: boolean
   alignmentInlierRatio: number
   displayMinimumAreaRatio: number
+  zoneCount: number
+  minimumZoneFreeRatio: number
 }
 
 export type RuntimeConfig = {

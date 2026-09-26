@@ -5,7 +5,11 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from walkway_monitor.detection.models import RouteCapacity
+from walkway_monitor.detection.models import (
+    ClearanceZone,
+    RouteCapacity,
+    ZoneClearance,
+)
 
 
 def clean_changed_mask(
@@ -65,6 +69,70 @@ def filter_components_by_area(mask: np.ndarray, minimum_area: int) -> np.ndarray
     keep = stats[:, cv2.CC_STAT_AREA] >= minimum_area
     keep[0] = False
     return (keep[labels].astype(np.uint8) * 255)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def measure_zone_clearance(
+    obstacle_mask: np.ndarray,
+    roi_mask: np.ndarray,
+    zone_count: int,
+    minimum_free_ratio: float,
+) -> ZoneClearance:
+    """Chia BEV theo chiều dọc và lấy lát cắt ngang tệ nhất từng đoạn."""
+    if obstacle_mask.shape != roi_mask.shape or obstacle_mask.ndim != 2:
+        raise ValueError("obstacle_mask và roi_mask phải là mảng 2D cùng kích thước.")
+    if not 1 <= zone_count <= 100:
+        raise ValueError("zone_count phải nằm trong [1, 100].")
+    if not 0 <= minimum_free_ratio <= 1:
+        raise ValueError("minimum_free_ratio phải nằm trong [0, 1].")
+
+    # Bước 1: chỉ giữ những hàng thật sự thuộc ROI để các mép canvas trống
+    # không tạo thêm đoạn giả ở đầu hoặc cuối hành lang.
+    roi = roi_mask > 0
+    free = roi & ~(obstacle_mask > 0)
+    valid_rows = np.flatnonzero(np.any(roi, axis=1))
+    if valid_rows.size < zone_count:
+        raise ValueError(
+            "Số đoạn không được lớn hơn số lát cắt ngang hợp lệ của BEV."
+        )
+
+    # Bước 2: chia đều theo trục dọc BEV. Mỗi đoạn lấy tỷ lệ trống nhỏ nhất
+    # của mọi lát cắt, vì robot phải đi qua toàn bộ chiều dài đoạn đó.
+    row_groups = np.array_split(valid_rows, zone_count)
+    zones: list[ClearanceZone] = []
+    blocked_indices: list[int] = []
+    for index, rows in enumerate(row_groups):
+        roi_widths = np.count_nonzero(roi[rows], axis=1)
+        free_widths = np.count_nonzero(free[rows], axis=1)
+        row_free_ratios = free_widths / roi_widths
+        zone_free_ratio = float(np.min(row_free_ratios))
+        blocked = zone_free_ratio < minimum_free_ratio
+        if blocked:
+            blocked_indices.append(index + 1)
+        zones.append(
+            ClearanceZone(
+                index=index + 1,
+                name=f"zone_{index + 1}",
+                start_ratio=index / zone_count,
+                end_ratio=(index + 1) / zone_count,
+                free_ratio=zone_free_ratio,
+                occupancy_ratio=1.0 - zone_free_ratio,
+                blocked=blocked,
+            )
+        )
+
+    # Bước 3: đoạn tệ nhất quyết định toàn hành lang; các đoạn khác không thể
+    # bù cho một vị trí mà robot bắt buộc phải đi qua.
+    minimum = min(zone.free_ratio for zone in zones)
+    return ZoneClearance(
+        zones=tuple(zones),
+        minimum_free_ratio=minimum,
+        minimum_required_ratio=float(minimum_free_ratio),
+        blocked_zone_indices=tuple(blocked_indices),
+        can_pass=not blocked_indices,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

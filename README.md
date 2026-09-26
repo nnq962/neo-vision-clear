@@ -4,6 +4,7 @@ Dự án được tổ chức thành các workspace độc lập:
 
 - `backend/`: toàn bộ ứng dụng Python, môi trường `uv`, model, test và dữ liệu runtime.
 - `frontend/`: dashboard Next.js được build thành static export.
+- `aggregator/`: service `uv` độc lập nhận JSON từ nhiều Jetson qua WebSocket.
 - `mediamtx/`: cấu hình MediaMTX cho RTSP và WebRTC.
 
 Danh sách lệnh development, Docker Compose, log và chẩn đoán nhanh nằm trong
@@ -27,6 +28,22 @@ cd frontend
 npm ci
 npm run build
 ```
+
+## Aggregator tùy chọn
+
+Aggregator chưa chạy mặc định cùng stack camera. Chỉ bật ở máy được chọn làm
+điểm tập kết; sửa ánh xạ camera và WS server đích trong
+`aggregator/config/config.json` trước khi chạy:
+
+```bash
+docker compose --profile aggregator up -d --build aggregator
+```
+
+Mở dashboard cấu hình và giám sát tại `http://<IP-máy-tập-kết>:8100`.
+
+Transport ingest hiện có tại `ws://<host>:8100/ws/ingest/<source_id>`. Backend
+trên từng Jetson cấu hình URL này qua `NVC_AGGREGATOR_WS_BASE_URL`. Xem
+[`aggregator/README.md`](aggregator/README.md) để chạy local và kiểm tra API.
 
 Frontend chạy độc lập với backend. Khi triển khai, frontend hoặc reverse proxy cần
 chuyển tiếp `/api` và `/ws` sang service FastAPI.

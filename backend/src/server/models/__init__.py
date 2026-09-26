@@ -1,5 +1,6 @@
 """Các schema JSON dùng bởi API và WebSocket."""
 
+from server.models.aggregator import CameraMeasurementMessage
 from server.models.calibration import (
     CalibrationConfig,
     CalibrationCreate,
@@ -22,9 +23,8 @@ from server.models.config import (
 from server.models.messages import (
     BottleneckPayload,
     CorridorInfoData,
-    CorridorInfoRequest,
-    CorridorInfoResponse,
     DifferenceZonePayload,
+    OverviewClearanceZonePayload,
     OverviewCameraInfo,
     OverviewInfoData,
     OverviewInfoRequest,
@@ -47,6 +47,7 @@ __all__ = [
     "CalibrationRunResponse",
     "CalibrationUpdate",
     "CameraConfig",
+    "CameraMeasurementMessage",
     "CameraCreate",
     "CameraResponse",
     "CameraUpdate",
@@ -54,12 +55,11 @@ __all__ = [
     "CpuMetrics",
     "BottleneckPayload",
     "CorridorInfoData",
-    "CorridorInfoRequest",
-    "CorridorInfoResponse",
     "DifferenceZonePayload",
     "GpuMetrics",
     "RamMetrics",
     "OverviewCameraInfo",
+    "OverviewClearanceZonePayload",
     "OverviewInfoData",
     "OverviewInfoRequest",
     "OverviewInfoResponse",

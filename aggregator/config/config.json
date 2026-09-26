@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "corridor": {
+    "corridor_id": "corridor-01",
+    "corridor_name": "Hàng lang test",
+    "required_width_cm": 20.0
+  },
+  "cameras": [
+    {
+      "camera_id": "07e4c61ae308",
+      "source_id": "jetson-a",
+      "order": 1,
+      "location_name": "Đầu hành lang"
+    },
+    {
+      "camera_id": "f05c394a016b",
+      "source_id": "jetson-a",
+      "order": 2,
+      "location_name": "Đoạn giữa A"
+    }
+  ],
+  "outbound": {
+    "enabled": false,
+    "websocket_url": "ws://robot-server:9000/ws/corridor-status",
+    "reconnect_seconds": 2.0
+  }
+}

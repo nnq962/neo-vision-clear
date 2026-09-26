@@ -63,6 +63,8 @@ const DEFAULT_RUNTIME: RuntimeConfig = {
     depthAlignment: true,
     alignmentInlierRatio: 0.55,
     displayMinimumAreaRatio: 0.001,
+    zoneCount: 10,
+    minimumZoneFreeRatio: 0.4,
   },
 }
 
@@ -210,6 +212,9 @@ export function RuntimeSettingsForm({
       morphology_divisor: DEFAULT_RUNTIME.detection.morphologyDivisor,
       alignment_inlier_ratio: DEFAULT_RUNTIME.detection.alignmentInlierRatio,
       bev_pixels_per_meter: DEFAULT_RUNTIME.detection.bevPixelsPerMeter,
+      zone_count: DEFAULT_RUNTIME.detection.zoneCount,
+      minimum_zone_free_ratio:
+        DEFAULT_RUNTIME.detection.minimumZoneFreeRatio,
     }
     for (const [name, value] of Object.entries(defaults)) {
       const input = formRef.current?.elements.namedItem(name)
@@ -371,6 +376,23 @@ export function RuntimeSettingsForm({
                 defaultValue={runtime.logIntervalSeconds}
                 min={0}
                 step={0.1}
+              />
+              <NumberField
+                id="zone-count"
+                name="zone_count"
+                label="Số đoạn hành lang"
+                defaultValue={runtime.detection.zoneCount}
+                min={1}
+                max={100}
+              />
+              <NumberField
+                id="minimum-zone-free-ratio"
+                name="minimum_zone_free_ratio"
+                label="Tỷ lệ trống tối thiểu (0–1)"
+                defaultValue={runtime.detection.minimumZoneFreeRatio}
+                min={0}
+                max={1}
+                step={0.01}
               />
             </CardContent>
           </Card>

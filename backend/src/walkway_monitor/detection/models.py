@@ -21,7 +21,7 @@ class RouteCapacity:
 
 @dataclass(frozen=True)
 class ClearanceZone:
-    """Tỷ lệ trống thấp nhất của một đoạn dọc trên raster BEV."""
+    """Mức chiếm dụng tổng hợp của một đoạn dọc trên raster BEV."""
 
     index: int
     name: str
@@ -29,6 +29,9 @@ class ClearanceZone:
     end_ratio: float
     free_ratio: float
     occupancy_ratio: float
+    walkway_width_meters: float
+    occupied_width_meters: float
+    free_width_meters: float
     blocked: bool
     camera_polygon: tuple[tuple[float, float], ...] = ()
 
@@ -43,6 +46,9 @@ class ClearanceZone:
             "end_ratio": self.end_ratio,
             "free_ratio": self.free_ratio,
             "occupancy_ratio": self.occupancy_ratio,
+            "walkway_width_meters": self.walkway_width_meters,
+            "occupied_width_meters": self.occupied_width_meters,
+            "free_width_meters": self.free_width_meters,
             "blocked": self.blocked,
             "camera_polygon": [list(point) for point in self.camera_polygon],
         }
@@ -53,8 +59,8 @@ class ZoneClearance:
     """Kết quả đánh giá toàn hành lang theo các đoạn BEV liên tiếp."""
 
     zones: tuple[ClearanceZone, ...] = ()
-    minimum_free_ratio: float = 1.0
-    minimum_required_ratio: float = 0.4
+    maximum_occupancy_ratio: float = 0.0
+    maximum_allowed_occupancy_ratio: float = 0.4
     blocked_zone_indices: tuple[int, ...] = ()
     can_pass: bool = True
 
@@ -64,8 +70,10 @@ class ZoneClearance:
         """Chuyển kết quả theo đoạn thành cấu trúc sẵn sàng mã hóa JSON."""
         return {
             "zones": [zone.to_dict() for zone in self.zones],
-            "minimum_free_ratio": self.minimum_free_ratio,
-            "minimum_required_ratio": self.minimum_required_ratio,
+            "maximum_occupancy_ratio": self.maximum_occupancy_ratio,
+            "maximum_allowed_occupancy_ratio": (
+                self.maximum_allowed_occupancy_ratio
+            ),
             "blocked_zone_indices": list(self.blocked_zone_indices),
             "can_pass": self.can_pass,
         }

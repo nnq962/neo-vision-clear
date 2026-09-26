@@ -46,12 +46,19 @@ class CameraMeasurementMessageTestCase(unittest.TestCase):
                         end_ratio=index / 10,
                         free_ratio=0.18 if index in (4, 5) else 0.8,
                         occupancy_ratio=0.82 if index in (4, 5) else 0.2,
+                        walkway_width_meters=1.0,
+                        occupied_width_meters=(
+                            0.82 if index in (4, 5) else 0.2
+                        ),
+                        free_width_meters=(
+                            0.18 if index in (4, 5) else 0.8
+                        ),
                         blocked=index in (4, 5),
                     )
                     for index in range(1, 11)
                 ),
-                minimum_free_ratio=0.18,
-                minimum_required_ratio=0.4,
+                maximum_occupancy_ratio=0.82,
+                maximum_allowed_occupancy_ratio=0.4,
                 blocked_zone_indices=(4, 5),
                 can_pass=False,
             ),
@@ -60,14 +67,17 @@ class CameraMeasurementMessageTestCase(unittest.TestCase):
         message = CameraMeasurementMessage.from_snapshot(self.camera, snapshot)
         payload = message.model_dump(mode="json", exclude_none=True)
 
-        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["schema_version"], 2)
         self.assertEqual(payload["camera_id"], "camera-03")
         self.assertEqual(payload["camera_name"], "Camera 3")
         self.assertEqual(payload["state"], "blocked")
         self.assertEqual(payload["blocked_zones"], [4, 5])
         self.assertEqual(payload["zone_count"], 10)
-        self.assertEqual(payload["max_passable_width_cm"], 18.0)
-        self.assertEqual(payload["reason"], "insufficient_clearance")
+        self.assertEqual(payload["maximum_occupancy_ratio"], 0.82)
+        self.assertEqual(payload["occupancy_threshold_ratio"], 0.4)
+        self.assertEqual(payload["zones"][3]["occupied_width_cm"], 82.0)
+        self.assertNotIn("max_passable_width_cm", payload)
+        self.assertEqual(payload["reason"], "occupancy_threshold_exceeded")
         self.assertNotIn("frame_index", payload)
 
 

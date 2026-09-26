@@ -27,7 +27,7 @@ class AggregatorAppTestCase(unittest.TestCase):
                 "corridor": {
                     "corridor_id": "corridor-test",
                     "corridor_name": "Hành lang kiểm thử",
-                    "required_width_cm": 50,
+                    "maximum_occupancy_ratio": 0.4,
                 },
                 "cameras": [
                     {
@@ -62,20 +62,35 @@ class AggregatorAppTestCase(unittest.TestCase):
         self,
         camera_id: str,
         state: str = "pass",
-        width_cm: float = 72,
+        occupancy_ratio: float = 0.2,
     ) -> dict:
         """Tạo message camera hợp lệ với timestamp hiện tại."""
-        blocked = state == "blocked"
+        blocked = occupancy_ratio >= 0.4
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "camera_id": camera_id,
             "camera_name": f"Camera {camera_id[-2:]}",
             "state": state,
             "zone_count": 10,
+            "zones": [
+                {
+                    "index": index,
+                    "occupancy_ratio": occupancy_ratio if index in (4, 5) else 0.1,
+                    "walkway_width_cm": 100.0,
+                    "occupied_width_cm": (
+                        occupancy_ratio * 100 if index in (4, 5) else 10.0
+                    ),
+                    "free_width_cm": (
+                        (1 - occupancy_ratio) * 100 if index in (4, 5) else 90.0
+                    ),
+                    "blocked": blocked and index in (4, 5),
+                }
+                for index in range(1, 11)
+            ],
             "blocked_zones": [4, 5] if blocked else [],
-            "minimum_free_ratio": 0.18 if blocked else 0.8,
-            "max_passable_width_cm": width_cm,
-            "reason": "insufficient_clearance" if blocked else None,
+            "maximum_occupancy_ratio": occupancy_ratio,
+            "occupancy_threshold_ratio": 0.4,
+            "reason": "occupancy_threshold_exceeded" if blocked else None,
             "observed_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -116,7 +131,7 @@ class AggregatorAppTestCase(unittest.TestCase):
             "corridor": {
                 "corridor_id": "corridor-new",
                 "corridor_name": "Hành lang mới",
-                "required_width_cm": 62,
+                "maximum_occupancy_ratio": 0.55,
             },
             "cameras": [
                 {
@@ -145,6 +160,32 @@ class AggregatorAppTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def test_legacy_width_config_migrates_to_default_occupancy(self) -> None:
+        """Config cũ phải khởi động được với ngưỡng chiếm dụng mặc định 40%."""
+        config = AggregatorConfig.model_validate(
+            {
+                "schema_version": 1,
+                "corridor": {
+                    "corridor_id": "legacy",
+                    "corridor_name": "Hành lang cũ",
+                    "required_width_cm": 50,
+                },
+                "cameras": [
+                    {
+                        "camera_id": "camera-old",
+                        "source_id": "jetson-old",
+                        "order": 1,
+                        "location_name": "Đầu hành lang",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(config.corridor.maximum_occupancy_ratio, 0.4)
+        self.assertNotIn("required_width_cm", config.model_dump()["corridor"])
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def test_all_fresh_cameras_produce_pass_decision(self) -> None:
         """Tất cả camera đủ rộng và mới phải kết luận hành lang đi được."""
         with TestClient(self.app) as client:
@@ -166,12 +207,12 @@ class AggregatorAppTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def test_camera_width_below_robot_threshold_produces_blocked(self) -> None:
-        """Aggregator tự chặn khi bề rộng nhỏ hơn required_width_cm."""
+    def test_camera_occupancy_above_threshold_produces_blocked(self) -> None:
+        """Aggregator tự chặn khi một zone đạt ngưỡng chiếm dụng."""
         with TestClient(self.app) as client:
             with client.websocket_connect("/ws/ingest/jetson-a") as jetson_a:
-                jetson_a.send_json(self._payload("camera-01", width_cm=72))
-                jetson_a.send_json(self._payload("camera-02", width_cm=18))
+                jetson_a.send_json(self._payload("camera-01", occupancy_ratio=0.2))
+                jetson_a.send_json(self._payload("camera-02", occupancy_ratio=0.65))
                 decision = client.get("/api/decision").json()
 
         self.assertEqual(decision["state"], "blocked")
@@ -183,8 +224,21 @@ class AggregatorAppTestCase(unittest.TestCase):
         )
         self.assertEqual(
             decision["blocked_areas"][0]["reason"],
-            "insufficient_clearance",
+            "occupancy_threshold_exceeded",
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_camera_occupancy_equal_threshold_is_blocked(self) -> None:
+        """Tỷ lệ đúng bằng ngưỡng 40 phần trăm phải được xem là bị chặn."""
+        with TestClient(self.app) as client:
+            with client.websocket_connect("/ws/ingest/jetson-a") as jetson_a:
+                jetson_a.send_json(self._payload("camera-01", occupancy_ratio=0.4))
+                jetson_a.send_json(self._payload("camera-02", occupancy_ratio=0.2))
+                decision = client.get("/api/decision").json()
+
+        self.assertEqual(decision["state"], "blocked")
+        self.assertEqual(decision["blocked_areas"][0]["blocked_zones"], [4, 5])
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -209,7 +263,7 @@ class AggregatorAppTestCase(unittest.TestCase):
                 socket.send_json(self._payload("camera-01"))
                 latest = client.get("/api/sources/jetson-a/latest").json()
 
-        self.assertEqual(latest["payload"]["schema_version"], 1)
+        self.assertEqual(latest["payload"]["schema_version"], 2)
         self.assertEqual(latest["payload"]["camera_id"], "camera-01")
 
 

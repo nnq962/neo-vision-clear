@@ -32,7 +32,7 @@ class BottleneckPayload(BaseModel):
 
 
 class ClearanceZonePayload(BaseModel):
-    """Phép đo tỷ lệ trống của một đoạn hành lang trên BEV."""
+    """Phép đo chiếm dụng tổng hợp của một đoạn hành lang trên BEV."""
 
     index: int = Field(ge=1)
     name: str
@@ -40,6 +40,9 @@ class ClearanceZonePayload(BaseModel):
     end_ratio: float = Field(ge=0.0, le=1.0)
     free_ratio: float = Field(ge=0.0, le=1.0)
     occupancy_ratio: float = Field(ge=0.0, le=1.0)
+    walkway_width_meters: float = Field(ge=0.0)
+    occupied_width_meters: float = Field(ge=0.0)
+    free_width_meters: float = Field(ge=0.0)
     blocked: bool
 
 
@@ -56,8 +59,8 @@ class CorridorInfoData(BaseModel):
     walkway_width_meters: float
     bottleneck: BottleneckPayload
     zones: list[ClearanceZonePayload]
-    minimum_free_ratio: float = Field(ge=0.0, le=1.0)
-    minimum_required_ratio: float = Field(ge=0.0, le=1.0)
+    maximum_occupancy_ratio: float = Field(ge=0.0, le=1.0)
+    maximum_allowed_occupancy_ratio: float = Field(ge=0.0, le=1.0)
     blocked_zone_indices: list[int]
     can_pass: bool
     frame_index: int

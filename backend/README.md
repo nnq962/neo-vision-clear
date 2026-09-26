@@ -200,7 +200,7 @@ FPS=18.62 | inference=42.1ms | analysis=3.4ms | render=0.0ms | bề rộng đi x
 | `--minimum-difference` | `0.03` | Ngưỡng depth gần hơn baseline tối thiểu |
 | `--bev-pixels-per-meter` | `100` | Raster BEV dùng 100 pixel cho mỗi mét khi đo bề rộng |
 | `--zone-count` | `10` | Chia chiều dài hành lang BEV thành 10 đoạn bằng nhau |
-| `--minimum-zone-free-ratio` | `0.4` | Mỗi đoạn phải còn ít nhất 40% tổng bề rộng trống |
+| `--maximum-zone-occupancy-ratio` | `0.4` | Một đoạn bị chặn khi tổng mức chiếm dụng đạt 40% |
 | `--depth-blur-kernel` | `5` | Làm mượt depth trước khi so sánh |
 | `--check-area-padding` | `12` | Mở rộng ROI 12 pixel để so sánh và làm sạch mask |
 | `--no-depth-alignment` | Tắt | Bỏ căn chỉnh và so sánh trực tiếp depth raw với baseline |
@@ -213,11 +213,12 @@ trống theo từng bề rộng footprint ứng viên và kiểm tra connected c
 cuối hành lang hay không. Kết quả cũ `maximum_passable_width_meters`, vị trí Y của nút thắt
 và các khoảng X còn trống tại đó vẫn được giữ để tương thích.
 
-Logic MVP chia các hàng hợp lệ của BEV thành `zone_count` đoạn dọc. Tại mỗi lát cắt ngang,
-mọi pixel trống được cộng lại, kể cả khi chúng nằm ở hai khoảng rời nhau. Tỷ lệ của một đoạn
-là lát cắt có tỷ lệ trống thấp nhất trong đoạn; chỉ cần một đoạn thấp hơn
-`minimum_zone_free_ratio` thì `can_pass=false`. Cách tính này cố ý chỉ dùng phần trăm tổng
-khoảng trống, chưa bảo đảm các khoảng trống rời nhau đủ rộng cho footprint robot.
+Logic MVP chia các hàng hợp lệ của BEV thành `zone_count` đoạn dọc. Tỷ lệ chiếm dụng của
+một đoạn bằng tổng pixel vật cản chia tổng pixel ROI trong toàn đoạn. Chỉ cần một đoạn đạt
+hoặc vượt `maximum_zone_occupancy_ratio` thì `can_pass=false`. Backend cũng quy đổi diện
+tích trung bình của mỗi đoạn thành độ rộng hành lang, độ rộng bị chiếm và độ rộng còn trống
+theo cm. Phép đo tuyến liên thông cũ vẫn được giữ nội bộ nhưng không còn dùng trong payload
+gửi Aggregator hoặc quyết định `pass / blocked`.
 Baseline không có `world_coordinates` sẽ bị từ chối thay vì trả số đo pixel dễ gây hiểu nhầm.
 Camera phải giữ nguyên vị trí.
 
@@ -278,7 +279,7 @@ trỏ tới một baseline và camera tương ứng; không cần lặp URL ho�
       "alignment_inlier_ratio": 0.55,
       "display_minimum_area_ratio": 0.001,
       "zone_count": 10,
-      "minimum_zone_free_ratio": 0.4
+      "maximum_zone_occupancy_ratio": 0.4
     }
   }
 }
@@ -344,15 +345,33 @@ hưởng detection. Payload không còn `frame_index`:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "camera_id": "camera-03",
   "camera_name": "Camera 3",
   "state": "blocked",
-  "zone_count": 10,
-  "blocked_zones": [4, 5],
-  "minimum_free_ratio": 0.18,
-  "max_passable_width_cm": 18,
-  "reason": "insufficient_clearance",
+  "zone_count": 2,
+  "zones": [
+    {
+      "index": 1,
+      "occupancy_ratio": 0.18,
+      "walkway_width_cm": 200,
+      "occupied_width_cm": 36,
+      "free_width_cm": 164,
+      "blocked": false
+    },
+    {
+      "index": 2,
+      "occupancy_ratio": 0.56,
+      "walkway_width_cm": 200,
+      "occupied_width_cm": 112,
+      "free_width_cm": 88,
+      "blocked": true
+    }
+  ],
+  "blocked_zones": [2],
+  "maximum_occupancy_ratio": 0.56,
+  "occupancy_threshold_ratio": 0.4,
+  "reason": "occupancy_threshold_exceeded",
   "observed_at": "2026-09-26T10:30:12.450Z"
 }
 ```
@@ -387,6 +406,9 @@ Response chứa số đo nội bộ, bổ sung `camera_polygon` cho từng đo�
         "end_ratio": 0.1,
         "free_ratio": 0.92,
         "occupancy_ratio": 0.08,
+        "walkway_width_meters": 1.75,
+        "occupied_width_meters": 0.14,
+        "free_width_meters": 1.61,
         "blocked": false,
         "camera_polygon": [[0.31, 0.24], [0.69, 0.24], [0.72, 0.31], [0.28, 0.31]]
       }

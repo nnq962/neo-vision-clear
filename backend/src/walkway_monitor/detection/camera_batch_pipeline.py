@@ -246,8 +246,8 @@ class CameraBatchDetectionPipeline:
         batch_count = max(batches, 1)
         frame_count = max(batches * camera_count, 1)
         measurements = " | ".join(
-            f"cam{index}=({snapshot.maximum_passable_width_meters:.2f}m/"
-            f"{snapshot.walkway_width_meters:.2f}m)"
+            f"cam{index}=(chiếm "
+            f"{snapshot.zone_clearance.maximum_occupancy_ratio:.0%})"
             for index, snapshot in enumerate(snapshots, start=1)
         )
         LOGGER.info(

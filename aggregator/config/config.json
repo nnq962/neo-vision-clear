@@ -3,20 +3,20 @@
   "corridor": {
     "corridor_id": "corridor-01",
     "corridor_name": "Hàng lang test",
-    "required_width_cm": 20.0
+    "maximum_occupancy_ratio": 0.6
   },
   "cameras": [
     {
       "camera_id": "07e4c61ae308",
       "source_id": "jetson-a",
       "order": 1,
-      "location_name": "Đầu hành lang"
+      "location_name": "Đoạn đầu hành lang"
     },
     {
       "camera_id": "f05c394a016b",
       "source_id": "jetson-a",
       "order": 2,
-      "location_name": "Đoạn giữa A"
+      "location_name": "Đoạn cuối hành lang"
     }
   ],
   "outbound": {

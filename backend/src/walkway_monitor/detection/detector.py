@@ -209,7 +209,8 @@ class WalkwayAnalyzer:
             bev_changed_mask,
             self._metric_bev.roi_mask,
             self._config.zone_count,
-            self._config.minimum_zone_free_ratio,
+            self._config.maximum_zone_occupancy_ratio,
+            self._metric_bev.pixels_per_meter,
         )
         zone_clearance = replace(
             zone_clearance,

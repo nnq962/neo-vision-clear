@@ -78,37 +78,44 @@ def measure_zone_clearance(
     obstacle_mask: np.ndarray,
     roi_mask: np.ndarray,
     zone_count: int,
-    minimum_free_ratio: float,
+    maximum_occupancy_ratio: float,
+    pixels_per_meter: float,
 ) -> ZoneClearance:
-    """Chia BEV theo chiều dọc và lấy lát cắt ngang tệ nhất từng đoạn."""
+    """Chia BEV theo chiều dọc và đo tổng mức chiếm dụng từng đoạn."""
     if obstacle_mask.shape != roi_mask.shape or obstacle_mask.ndim != 2:
         raise ValueError("obstacle_mask và roi_mask phải là mảng 2D cùng kích thước.")
     if not 1 <= zone_count <= 100:
         raise ValueError("zone_count phải nằm trong [1, 100].")
-    if not 0 <= minimum_free_ratio <= 1:
-        raise ValueError("minimum_free_ratio phải nằm trong [0, 1].")
+    if not 0 < maximum_occupancy_ratio <= 1:
+        raise ValueError("maximum_occupancy_ratio phải nằm trong (0, 1].")
+    if pixels_per_meter <= 0:
+        raise ValueError("pixels_per_meter phải là số dương.")
 
     # Bước 1: chỉ giữ những hàng thật sự thuộc ROI để các mép canvas trống
     # không tạo thêm đoạn giả ở đầu hoặc cuối hành lang.
     roi = roi_mask > 0
-    free = roi & ~(obstacle_mask > 0)
+    occupied = roi & (obstacle_mask > 0)
     valid_rows = np.flatnonzero(np.any(roi, axis=1))
     if valid_rows.size < zone_count:
         raise ValueError(
             "Số đoạn không được lớn hơn số lát cắt ngang hợp lệ của BEV."
         )
 
-    # Bước 2: chia đều theo trục dọc BEV. Mỗi đoạn lấy tỷ lệ trống nhỏ nhất
-    # của mọi lát cắt, vì robot phải đi qua toàn bộ chiều dài đoạn đó.
+    # Bước 2: chia đều theo trục dọc BEV. Tỷ lệ chiếm dụng của đoạn dùng tổng
+    # pixel vật cản chia tổng pixel ROI, thay vì chỉ lấy lát cắt xấu nhất.
     row_groups = np.array_split(valid_rows, zone_count)
     zones: list[ClearanceZone] = []
     blocked_indices: list[int] = []
     for index, rows in enumerate(row_groups):
-        roi_widths = np.count_nonzero(roi[rows], axis=1)
-        free_widths = np.count_nonzero(free[rows], axis=1)
-        row_free_ratios = free_widths / roi_widths
-        zone_free_ratio = float(np.min(row_free_ratios))
-        blocked = zone_free_ratio < minimum_free_ratio
+        roi_pixels = int(np.count_nonzero(roi[rows]))
+        occupied_pixels = int(np.count_nonzero(occupied[rows]))
+        zone_occupancy_ratio = occupied_pixels / roi_pixels
+        zone_free_ratio = 1.0 - zone_occupancy_ratio
+        row_count = len(rows)
+        walkway_width_meters = roi_pixels / row_count / pixels_per_meter
+        occupied_width_meters = occupied_pixels / row_count / pixels_per_meter
+        free_width_meters = walkway_width_meters - occupied_width_meters
+        blocked = zone_occupancy_ratio >= maximum_occupancy_ratio
         if blocked:
             blocked_indices.append(index + 1)
         zones.append(
@@ -118,18 +125,21 @@ def measure_zone_clearance(
                 start_ratio=index / zone_count,
                 end_ratio=(index + 1) / zone_count,
                 free_ratio=zone_free_ratio,
-                occupancy_ratio=1.0 - zone_free_ratio,
+                occupancy_ratio=zone_occupancy_ratio,
+                walkway_width_meters=walkway_width_meters,
+                occupied_width_meters=occupied_width_meters,
+                free_width_meters=free_width_meters,
                 blocked=blocked,
             )
         )
 
-    # Bước 3: đoạn tệ nhất quyết định toàn hành lang; các đoạn khác không thể
-    # bù cho một vị trí mà robot bắt buộc phải đi qua.
-    minimum = min(zone.free_ratio for zone in zones)
+    # Bước 3: chỉ cần một đoạn đạt hoặc vượt ngưỡng chiếm dụng thì toàn hành
+    # lang bị chặn; các đoạn khác không bù được cho đoạn đó.
+    maximum = max(zone.occupancy_ratio for zone in zones)
     return ZoneClearance(
         zones=tuple(zones),
-        minimum_free_ratio=minimum,
-        minimum_required_ratio=float(minimum_free_ratio),
+        maximum_occupancy_ratio=maximum,
+        maximum_allowed_occupancy_ratio=float(maximum_occupancy_ratio),
         blocked_zone_indices=tuple(blocked_indices),
         can_pass=not blocked_indices,
     )

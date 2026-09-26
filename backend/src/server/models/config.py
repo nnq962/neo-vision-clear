@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from server.models.calibration import CalibrationConfig
 from server.models.camera import CameraConfig
@@ -28,7 +28,15 @@ class RuntimeDetectionConfig(BaseModel):
     alignment_inlier_ratio: float = Field(default=0.55, gt=0.5, le=1)
     display_minimum_area_ratio: float = Field(default=0.001, ge=0, lt=1)
     zone_count: int = Field(default=10, ge=1, le=100)
-    minimum_zone_free_ratio: float = Field(default=0.4, ge=0, le=1)
+    maximum_zone_occupancy_ratio: float = Field(
+        default=0.4,
+        gt=0,
+        le=1,
+        validation_alias=AliasChoices(
+            "maximum_zone_occupancy_ratio",
+            "minimum_zone_free_ratio",
+        ),
+    )
 
     # ─────────────────────────────────────────────────────────────────────────
 

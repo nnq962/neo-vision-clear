@@ -11,19 +11,37 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 CameraState = Literal["pass", "blocked", "warming_up", "error"]
 
 
+class ZoneOccupancyMeasurement(BaseModel):
+    """Mức chiếm dụng và bề rộng trung bình của một zone BEV."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=1, le=100)
+    occupancy_ratio: float = Field(ge=0.0, le=1.0)
+    walkway_width_cm: float = Field(ge=0.0)
+    occupied_width_cm: float = Field(ge=0.0)
+    free_width_cm: float = Field(ge=0.0)
+    blocked: bool
+
+
 class CameraMeasurement(BaseModel):
     """Payload chính thức do một Jetson gửi cho một camera."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     camera_id: str = Field(min_length=1, max_length=100)
     camera_name: str = Field(min_length=1, max_length=100)
     state: CameraState
     zone_count: Optional[int] = Field(default=None, ge=1, le=100)
+    zones: List[ZoneOccupancyMeasurement] = Field(default_factory=list)
     blocked_zones: List[int] = Field(default_factory=list)
-    minimum_free_ratio: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    max_passable_width_cm: Optional[float] = Field(default=None, ge=0.0)
+    maximum_occupancy_ratio: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    occupancy_threshold_ratio: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0
+    )
     reason: Optional[str] = Field(default=None, min_length=1, max_length=100)
     observed_at: datetime
 
@@ -32,10 +50,22 @@ class CameraMeasurement(BaseModel):
         """Kiểm tra các field đo tương thích với trạng thái camera."""
         # Bước 1: kết quả pass/blocked phải có số đo dùng để Aggregator quyết định.
         if self.state in ("pass", "blocked"):
-            if self.zone_count is None or self.max_passable_width_cm is None:
+            if (
+                self.zone_count is None
+                or len(self.zones) != self.zone_count
+                or self.maximum_occupancy_ratio is None
+                or self.occupancy_threshold_ratio is None
+            ):
                 raise ValueError(
-                    "state pass/blocked cần zone_count và max_passable_width_cm."
+                    "state pass/blocked cần đủ zone và ngưỡng chiếm dụng."
                 )
+        zone_indices = [zone.index for zone in self.zones]
+        if len(zone_indices) != len(set(zone_indices)):
+            raise ValueError("zones không được trùng index.")
+        if self.zone_count is not None and zone_indices:
+            expected_indices = list(range(1, self.zone_count + 1))
+            if sorted(zone_indices) != expected_indices:
+                raise ValueError("zones.index phải liên tiếp từ 1 đến zone_count.")
         if self.zone_count is not None and any(
             zone < 1 or zone > self.zone_count for zone in self.blocked_zones
         ):
@@ -97,8 +127,9 @@ class CameraStatus(BaseModel):
     age_ms: Optional[int] = Field(default=None, ge=0)
     stale: bool
     blocked_zones: List[int] = Field(default_factory=list)
-    minimum_free_ratio: Optional[float] = None
-    max_passable_width_cm: Optional[float] = None
+    zones: List[ZoneOccupancyMeasurement] = Field(default_factory=list)
+    maximum_occupancy_ratio: Optional[float] = None
+    occupancy_threshold_ratio: Optional[float] = None
     observed_at: Optional[datetime] = None
 
 
@@ -113,8 +144,9 @@ class BlockedArea(BaseModel):
     camera_name: str
     blocked_zones: List[int]
     zone_count: int
-    minimum_free_ratio: Optional[float] = None
-    max_passable_width_cm: float
+    zones: List[ZoneOccupancyMeasurement]
+    maximum_occupancy_ratio: float
+    occupancy_threshold_ratio: float
     reason: str
     source: str
     observed_at: datetime
@@ -138,12 +170,12 @@ class CorridorDecision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     corridor_id: str
     corridor_name: str
     state: Literal["pass", "blocked", "unknown"]
     can_pass: Optional[bool]
-    required_width_cm: float
+    occupancy_threshold_ratio: float
     blocked_areas: List[BlockedArea] = Field(default_factory=list)
     unavailable_cameras: List[UnavailableCamera] = Field(default_factory=list)
     decided_at: datetime

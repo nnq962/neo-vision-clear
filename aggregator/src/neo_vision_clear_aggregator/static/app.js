@@ -16,6 +16,7 @@ const stateLabels = {
 };
 
 const reasonLabels = {
+  occupancy_threshold_exceeded: "Vượt ngưỡng chiếm dụng",
   insufficient_clearance: "Không đủ độ rộng",
   route_disconnected: "Đường đi không liên thông",
   camera_disconnected: "Mất kết nối camera",
@@ -117,7 +118,7 @@ function renderDashboard() {
   $("#decision-icon").textContent = decision.state === "pass" ? "✓" : decision.state === "blocked" ? "!" : "?";
   $("#decision-state").textContent = stateLabels[decision.state];
   $("#decision-subtitle").textContent = decision.state === "pass"
-    ? "Toàn bộ camera đủ độ rộng"
+    ? "Mọi đoạn đều dưới ngưỡng chiếm dụng"
     : decision.state === "blocked"
       ? `${decision.blocked_areas.length} vị trí đang bị chặn`
       : `${decision.unavailable_cameras.length} camera chưa sẵn sàng`;
@@ -129,7 +130,7 @@ function renderDashboard() {
   $("#outbound-subtitle").textContent = outbound.enabled
     ? `${outbound.sent_messages.toLocaleString("vi-VN")} message đã gửi`
     : "Chưa bật outbound";
-  $("#required-width-chip").textContent = `Yêu cầu ${decision.required_width_cm} cm`;
+  $("#occupancy-threshold-chip").textContent = `Ngưỡng ${(decision.occupancy_threshold_ratio * 100).toFixed(0)}%`;
 
   renderCameras(cameras);
   renderDecision(decision);
@@ -145,16 +146,21 @@ function renderCameras(cameras) {
   }
   body.innerHTML = cameras.map((camera) => {
     const zones = camera.blocked_zones?.length ? camera.blocked_zones.join(", ") : "—";
-    const width = camera.max_passable_width_cm == null
+    const occupancy = camera.maximum_occupancy_ratio == null
       ? "—"
-      : `<div class="metric"><strong>${camera.max_passable_width_cm}</strong><small>cm</small></div>`;
+      : `<div class="metric"><strong>${(camera.maximum_occupancy_ratio * 100).toFixed(1)}</strong><small>%</small></div>`;
+    const worstZone = camera.zones?.reduce((current, zone) =>
+      !current || zone.occupancy_ratio > current.occupancy_ratio ? zone : current, null);
+    const widthDetail = worstZone
+      ? `Chiếm ${worstZone.occupied_width_cm} cm · trống ${worstZone.free_width_cm} cm`
+      : "";
     return `<tr>
       <td><div class="location-cell"><span class="order-dot">${camera.order}</span><div><span class="primary-text">${escapeHtml(camera.location_name)}</span><span class="secondary-text">Vị trí ${camera.order}</span></div></div></td>
       <td><span class="primary-text">${escapeHtml(camera.camera_name || camera.camera_id)}</span><span class="secondary-text">${escapeHtml(camera.camera_id)} · ${escapeHtml(camera.source_id)}</span></td>
       <td>${badge(camera.state, camera.stale)}</td>
-      <td>${width}</td>
+      <td>${occupancy}<span class="secondary-text">${escapeHtml(widthDetail)}</span></td>
       <td><span class="metric">${escapeHtml(zones)}</span></td>
-      <td><span class="primary-text">${formatAge(camera.age_ms)}</span><span class="secondary-text">${camera.minimum_free_ratio == null ? "" : `Trống tối thiểu ${(camera.minimum_free_ratio * 100).toFixed(0)}%`}</span></td>
+      <td><span class="primary-text">${formatAge(camera.age_ms)}</span><span class="secondary-text">${camera.occupancy_threshold_ratio == null ? "" : `Ngưỡng ${(camera.occupancy_threshold_ratio * 100).toFixed(0)}%`}</span></td>
     </tr>`;
   }).join("");
 }
@@ -168,13 +174,13 @@ function renderDecision(decision) {
 
   const details = [
     ["Corridor ID", decision.corridor_id, false],
-    ["Độ rộng yêu cầu", `${decision.required_width_cm} cm`, false],
+    ["Ngưỡng chiếm dụng", `${(decision.occupancy_threshold_ratio * 100).toFixed(0)}%`, false],
     ["Thời điểm quyết định", formatDate(decision.decided_at), false],
   ];
   decision.blocked_areas.forEach((area) => {
     details.push([
       area.location_name,
-      `${reasonLabels[area.reason] || area.reason} · ${area.max_passable_width_cm} cm`,
+      `${reasonLabels[area.reason] || area.reason} · ${(area.maximum_occupancy_ratio * 100).toFixed(1)}%`,
       true,
     ]);
   });
@@ -237,7 +243,7 @@ function populateConfigForm() {
   const config = ui.config;
   $("#corridor-id").value = config.corridor.corridor_id;
   $("#corridor-name-input").value = config.corridor.corridor_name;
-  $("#required-width").value = config.corridor.required_width_cm;
+  $("#maximum-occupancy").value = config.corridor.maximum_occupancy_ratio;
   $("#outbound-enabled").checked = config.outbound.enabled;
   $("#outbound-url").value = config.outbound.websocket_url || "";
   $("#reconnect-seconds").value = config.outbound.reconnect_seconds;
@@ -277,7 +283,7 @@ function collectConfig() {
     corridor: {
       corridor_id: $("#corridor-id").value.trim(),
       corridor_name: $("#corridor-name-input").value.trim(),
-      required_width_cm: Number($("#required-width").value),
+      maximum_occupancy_ratio: Number($("#maximum-occupancy").value),
     },
     cameras,
     outbound: {

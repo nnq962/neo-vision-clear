@@ -6,19 +6,31 @@ import json
 import os
 from pathlib import Path
 import tempfile
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class CorridorConfig(BaseModel):
-    """Thông tin hành lang và kích thước tối thiểu robot cần."""
+    """Thông tin hành lang và ngưỡng chiếm dụng cho phép."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     corridor_id: str = Field(min_length=1, max_length=100)
     corridor_name: str = Field(min_length=1, max_length=200)
-    required_width_cm: float = Field(gt=0)
+    maximum_occupancy_ratio: float = Field(default=0.4, gt=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_required_width(cls, payload: Any) -> Any:
+        """Bỏ cấu hình độ rộng cũ và dùng ngưỡng chiếm dụng mặc định 40%."""
+        # Bước 1: bản sao tránh sửa object JSON mà caller còn giữ tham chiếu.
+        if not isinstance(payload, dict) or "required_width_cm" not in payload:
+            return payload
+        migrated = dict(payload)
+        migrated.pop("required_width_cm", None)
+        migrated.setdefault("maximum_occupancy_ratio", 0.4)
+        return migrated
 
 
 class CameraLocationConfig(BaseModel):

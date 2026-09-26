@@ -68,21 +68,20 @@ type ClearanceZone = {
   endRatio: number
   freeRatio: number
   occupancyRatio: number
+  walkwayWidthMeters: number
+  occupiedWidthMeters: number
+  freeWidthMeters: number
   blocked: boolean
   cameraPolygon: [number, number][]
 }
 
 type CorridorData = {
-  maximumPassableWidthMeters: number
-  walkwayWidthMeters: number
-  bottleneckYMeters: number
-  freeXRangesMeters: [number, number][]
   frameIndex: number
   capturedAt: number
   differenceZones: DifferenceZone[]
   zones: ClearanceZone[]
-  minimumFreeRatio: number
-  minimumRequiredRatio: number
+  maximumOccupancyRatio: number
+  maximumAllowedOccupancyRatio: number
   blockedZoneIndices: number[]
   canPass: boolean
 }
@@ -142,8 +141,8 @@ function readingStatusLabel(reading: CorridorReading): string {
   return "Có lỗi"
 }
 
-function formatMeters(value: number | undefined): string {
-  return value === undefined ? "—" : `${value.toFixed(2)} m`
+function formatCentimeters(value: number | undefined): string {
+  return value === undefined ? "—" : `${(value * 100).toFixed(1)} cm`
 }
 
 function formatAge(ageMs: number | undefined): string {
@@ -233,31 +232,15 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
     return { status, ageMs, error }
   }
   const data = payload.data as Record<string, unknown>
-  const bottleneck = data.bottleneck
-  if (typeof bottleneck !== "object" || bottleneck === null) {
-    return { status, ageMs, error }
-  }
-  const bottleneckPayload = bottleneck as Record<string, unknown>
-  const freeRanges = bottleneckPayload.free_x_ranges_meters
   const changedZones = data.changed_zones
   const clearanceZones = data.zones
   if (
-    typeof data.maximum_passable_width_meters !== "number" ||
-    typeof data.walkway_width_meters !== "number" ||
-    typeof bottleneckPayload.y_meters !== "number" ||
     typeof data.frame_index !== "number" ||
     typeof data.captured_at !== "number" ||
-    !Array.isArray(freeRanges) ||
-    !freeRanges.every(
-      (range) =>
-        Array.isArray(range) &&
-        range.length === 2 &&
-        range.every((coordinate) => typeof coordinate === "number")
-    ) ||
     !Array.isArray(changedZones) ||
     !Array.isArray(clearanceZones) ||
-    typeof data.minimum_free_ratio !== "number" ||
-    typeof data.minimum_required_ratio !== "number" ||
+    typeof data.maximum_occupancy_ratio !== "number" ||
+    typeof data.maximum_allowed_occupancy_ratio !== "number" ||
     !Array.isArray(data.blocked_zone_indices) ||
     !data.blocked_zone_indices.every(
       (index) => typeof index === "number" && Number.isInteger(index)
@@ -308,6 +291,9 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
       typeof zonePayload.end_ratio !== "number" ||
       typeof zonePayload.free_ratio !== "number" ||
       typeof zonePayload.occupancy_ratio !== "number" ||
+      typeof zonePayload.walkway_width_meters !== "number" ||
+      typeof zonePayload.occupied_width_meters !== "number" ||
+      typeof zonePayload.free_width_meters !== "number" ||
       typeof zonePayload.blocked !== "boolean" ||
       (cameraPolygon !== undefined &&
         (!Array.isArray(cameraPolygon) ||
@@ -334,6 +320,9 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
       endRatio: zonePayload.end_ratio,
       freeRatio: zonePayload.free_ratio,
       occupancyRatio: zonePayload.occupancy_ratio,
+      walkwayWidthMeters: zonePayload.walkway_width_meters,
+      occupiedWidthMeters: zonePayload.occupied_width_meters,
+      freeWidthMeters: zonePayload.free_width_meters,
       blocked: zonePayload.blocked,
       cameraPolygon: Array.isArray(cameraPolygon)
         ? cameraPolygon as [number, number][]
@@ -345,16 +334,13 @@ function parseCorridorReading(value: unknown): CorridorReading | undefined {
     ageMs,
     error,
     data: {
-      maximumPassableWidthMeters: data.maximum_passable_width_meters,
-      walkwayWidthMeters: data.walkway_width_meters,
-      bottleneckYMeters: bottleneckPayload.y_meters,
-      freeXRangesMeters: freeRanges as [number, number][],
       frameIndex: data.frame_index,
       capturedAt: data.captured_at,
       differenceZones,
       zones,
-      minimumFreeRatio: data.minimum_free_ratio,
-      minimumRequiredRatio: data.minimum_required_ratio,
+      maximumOccupancyRatio: data.maximum_occupancy_ratio,
+      maximumAllowedOccupancyRatio:
+        data.maximum_allowed_occupancy_ratio,
       blockedZoneIndices: data.blocked_zone_indices as number[],
       canPass: data.can_pass,
     },
@@ -396,11 +382,11 @@ function overviewWebSocketUrl(): string {
 }
 
 function ClearanceZonesPanel({ data }: { data: CorridorData }) {
-  const minimumZone = data.zones.reduce<ClearanceZone | undefined>(
-    (minimum, zone) =>
-      minimum === undefined || zone.freeRatio < minimum.freeRatio
+  const maximumZone = data.zones.reduce<ClearanceZone | undefined>(
+    (maximum, zone) =>
+      maximum === undefined || zone.occupancyRatio > maximum.occupancyRatio
         ? zone
-        : minimum,
+        : maximum,
     undefined
   )
   const orderedZones = [...data.zones].sort(
@@ -417,8 +403,8 @@ function ClearanceZonesPanel({ data }: { data: CorridorData }) {
         <div>
           <p className="text-sm font-medium">Phân đoạn BEV</p>
           <p className="text-xs text-muted-foreground">
-            Mặt bằng nhìn từ trên xuống · ngưỡng thông thoáng{" "}
-            {formatPercentage(data.minimumRequiredRatio)}
+            Mặt bằng nhìn từ trên xuống · ngưỡng chiếm dụng{" "}
+            {formatPercentage(data.maximumAllowedOccupancyRatio)}
           </p>
         </div>
         <Badge variant={data.canPass ? "default" : "destructive"}>
@@ -462,7 +448,7 @@ function ClearanceZonesPanel({ data }: { data: CorridorData }) {
                     render={
                       <button
                         type="button"
-                        aria-label={`Đoạn ${zone.index}: ${formatPercentage(zone.freeRatio)} trống, ${formatPercentage(zone.occupancyRatio)} chiếm dụng, ${zone.blocked ? "bị chặn" : "đạt ngưỡng"}`}
+                        aria-label={`Đoạn ${zone.index}: ${formatPercentage(zone.occupancyRatio)} chiếm dụng, tương đương ${formatCentimeters(zone.occupiedWidthMeters)}, ${zone.blocked ? "bị chặn" : "đạt ngưỡng"}`}
                         className={
                           zone.blocked
                             ? "flex min-h-0 w-full cursor-default items-center justify-between gap-2 border-b border-destructive/30 bg-destructive/15 px-3 text-left text-destructive outline-none last:border-b-0 hover:bg-destructive/20 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring"
@@ -475,12 +461,12 @@ function ClearanceZonesPanel({ data }: { data: CorridorData }) {
                               Đoạn {zone.index}
                             </span>
                             <span className="shrink-0 text-xs font-semibold tabular-nums">
-                              {formatPercentage(zone.freeRatio)} trống
+                              {formatPercentage(zone.occupancyRatio)} chiếm
                             </span>
                           </>
                         ) : (
                           <span className="sr-only">
-                            Đoạn {zone.index}, {formatPercentage(zone.freeRatio)} trống
+                            Đoạn {zone.index}, {formatPercentage(zone.occupancyRatio)} chiếm dụng
                           </span>
                         )}
                       </button>
@@ -495,6 +481,10 @@ function ClearanceZonesPanel({ data }: { data: CorridorData }) {
                       {formatPercentage(zone.freeRatio)} trống
                       {" · "}
                       {formatPercentage(zone.occupancyRatio)} chiếm dụng
+                      {" · "}
+                      {formatCentimeters(zone.occupiedWidthMeters)} chiếm
+                      {" · "}
+                      {formatCentimeters(zone.freeWidthMeters)} trống
                     </span>
                   </TooltipContent>
                 </Tooltip>
@@ -525,8 +515,8 @@ function ClearanceZonesPanel({ data }: { data: CorridorData }) {
           </span>
         </div>
         <span className="tabular-nums">
-          Thấp nhất: {formatPercentage(data.minimumFreeRatio)}
-          {minimumZone ? ` tại đoạn ${minimumZone.index}` : ""}
+          Cao nhất: {formatPercentage(data.maximumOccupancyRatio)}
+          {maximumZone ? ` tại đoạn ${maximumZone.index}` : ""}
         </span>
       </div>
       <p className="text-xs text-muted-foreground">
@@ -584,6 +574,13 @@ function CameraResultCard({
   const clearanceZoneOverlays = displayData?.zones.filter(
     (zone) => zone.cameraPolygon.length >= 3
   ) ?? []
+  const mostOccupiedZone = displayData?.zones.reduce<ClearanceZone | undefined>(
+    (maximum, zone) =>
+      maximum === undefined || zone.occupancyRatio > maximum.occupancyRatio
+        ? zone
+        : maximum,
+    undefined
+  )
   const polygon = source.baseline.roiPoints
 
   return (
@@ -702,21 +699,23 @@ function CameraResultCard({
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-lg border p-2.5">
-            <p className="text-xs text-muted-foreground">Rộng đi qua</p>
+            <p className="text-xs text-muted-foreground">Chiếm dụng cao nhất</p>
             <p className="font-medium tabular-nums">
-              {formatMeters(displayData?.maximumPassableWidthMeters)}
+              {displayData
+                ? formatPercentage(displayData.maximumOccupancyRatio)
+                : "—"}
             </p>
           </div>
           <div className="rounded-lg border p-2.5">
-            <p className="text-xs text-muted-foreground">Hành lang</p>
+            <p className="text-xs text-muted-foreground">Rộng bị chiếm</p>
             <p className="font-medium tabular-nums">
-              {formatMeters(displayData?.walkwayWidthMeters)}
+              {formatCentimeters(mostOccupiedZone?.occupiedWidthMeters)}
             </p>
           </div>
           <div className="rounded-lg border p-2.5">
-            <p className="text-xs text-muted-foreground">Nút thắt Y</p>
+            <p className="text-xs text-muted-foreground">Rộng còn trống</p>
             <p className="font-medium tabular-nums">
-              {formatMeters(displayData?.bottleneckYMeters)}
+              {formatCentimeters(mostOccupiedZone?.freeWidthMeters)}
             </p>
           </div>
           <div className="rounded-lg border p-2.5">
@@ -728,19 +727,6 @@ function CameraResultCard({
         </div>
 
         {displayData ? <ClearanceZonesPanel data={displayData} /> : null}
-
-        {displayData?.freeXRangesMeters.length ? (
-          <div className="grid gap-1.5">
-            <p className="text-xs text-muted-foreground">Khoảng trống theo chiều ngang</p>
-            <div className="flex flex-wrap gap-1.5">
-              {displayData.freeXRangesMeters.map(([start, end], index) => (
-                <Badge key={`${start}-${end}-${index}`} variant="secondary">
-                  X: {start.toFixed(2)} → {end.toFixed(2)} m
-                </Badge>
-              ))}
-            </div>
-          </div>
-        ) : null}
 
         {showReading && reading.error ? (
           <Alert variant="destructive">

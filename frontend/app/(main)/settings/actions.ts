@@ -67,9 +67,9 @@ export async function saveRuntimeConfig(
         "display_minimum_area_ratio"
       ),
       zoneCount: readNumber(formData, "zone_count"),
-      minimumZoneFreeRatio: readNumber(
+      maximumZoneOccupancyRatio: readNumber(
         formData,
-        "minimum_zone_free_ratio"
+        "maximum_zone_occupancy_ratio"
       ),
     },
   }
@@ -107,12 +107,12 @@ export async function saveRuntimeConfig(
       display_minimum_area_ratio:
         runtime.detection.displayMinimumAreaRatio,
       zone_count: runtime.detection.zoneCount,
-      minimum_zone_free_ratio: runtime.detection.minimumZoneFreeRatio,
+      maximum_zone_occupancy_ratio:
+        runtime.detection.maximumZoneOccupancyRatio,
     },
   }
 
-  try {
-    const response = await fetch("/api/runtime", {
+  try { const response = await fetch("/api/runtime", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

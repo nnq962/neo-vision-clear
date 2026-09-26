@@ -16,7 +16,7 @@ trên backend; `source_id` phải trùng `NVC_JETSON_ID` của máy đang quản
   "corridor": {
     "corridor_id": "corridor-01",
     "corridor_name": "Hành lang tầng 1",
-    "required_width_cm": 50
+    "maximum_occupancy_ratio": 0.4
   },
   "cameras": [
     {
@@ -79,15 +79,19 @@ Jetson push message một chiều, không cần ACK:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "camera_id": "camera-03",
   "camera_name": "Camera 3",
   "state": "blocked",
-  "zone_count": 10,
-  "blocked_zones": [4, 5],
-  "minimum_free_ratio": 0.18,
-  "max_passable_width_cm": 18,
-  "reason": "insufficient_clearance",
+  "zone_count": 2,
+  "zones": [
+    {"index": 1, "occupancy_ratio": 0.18, "walkway_width_cm": 200, "occupied_width_cm": 36, "free_width_cm": 164, "blocked": false},
+    {"index": 2, "occupancy_ratio": 0.56, "walkway_width_cm": 200, "occupied_width_cm": 112, "free_width_cm": 88, "blocked": true}
+  ],
+  "blocked_zones": [2],
+  "maximum_occupancy_ratio": 0.56,
+  "occupancy_threshold_ratio": 0.4,
+  "reason": "occupancy_threshold_exceeded",
   "observed_at": "2026-09-26T10:30:12.450Z"
 }
 ```
@@ -96,23 +100,27 @@ Kết luận outbound khi hành lang tắc:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "corridor_id": "corridor-01",
   "corridor_name": "Hành lang tầng 1",
   "state": "blocked",
   "can_pass": false,
-  "required_width_cm": 50,
+  "occupancy_threshold_ratio": 0.4,
   "blocked_areas": [
     {
       "order": 3,
       "location_name": "Đoạn giữa B",
       "camera_id": "camera-03",
       "camera_name": "Camera 3",
-      "blocked_zones": [4, 5],
-      "zone_count": 10,
-      "minimum_free_ratio": 0.18,
-      "max_passable_width_cm": 18,
-      "reason": "insufficient_clearance",
+      "blocked_zones": [2],
+      "zone_count": 2,
+      "zones": [
+        {"index": 1, "occupancy_ratio": 0.18, "walkway_width_cm": 200, "occupied_width_cm": 36, "free_width_cm": 164, "blocked": false},
+        {"index": 2, "occupancy_ratio": 0.56, "walkway_width_cm": 200, "occupied_width_cm": 112, "free_width_cm": 88, "blocked": true}
+      ],
+      "maximum_occupancy_ratio": 0.56,
+      "occupancy_threshold_ratio": 0.4,
+      "reason": "occupancy_threshold_exceeded",
       "source": "jetson-b",
       "observed_at": "2026-09-26T10:30:12.450Z"
     }
@@ -124,9 +132,9 @@ Kết luận outbound khi hành lang tắc:
 
 Quy tắc tổng hợp:
 
-- Có ít nhất một camera tắc hoặc độ rộng nhỏ hơn `required_width_cm`: `blocked`.
+- Có ít nhất một zone đạt hoặc vượt `maximum_occupancy_ratio`: `blocked`.
 - Không tắc nhưng có camera thiếu, stale, warming-up hoặc error: `unknown`.
-- Mọi camera đã cấu hình đều mới và đủ rộng: `pass`.
+- Mọi camera đã cấu hình đều mới và mọi zone dưới ngưỡng: `pass`.
 
 ## Docker
 

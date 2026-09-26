@@ -220,6 +220,9 @@ class ServerAppTestCase(unittest.TestCase):
                             end_ratio=1.0,
                             free_ratio=0.8,
                             occupancy_ratio=0.2,
+                            walkway_width_meters=1.75,
+                            occupied_width_meters=0.35,
+                            free_width_meters=1.4,
                             blocked=False,
                             camera_polygon=(
                                 (0.2, 0.3),

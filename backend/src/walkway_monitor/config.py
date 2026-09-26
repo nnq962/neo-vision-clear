@@ -61,7 +61,7 @@ class DetectionConfig:
     alignment_inlier_ratio: float = 0.55
     display_minimum_area_ratio: float = 0.001
     zone_count: int = 10
-    minimum_zone_free_ratio: float = 0.4
+    maximum_zone_occupancy_ratio: float = 0.4
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -85,5 +85,7 @@ class DetectionConfig:
             raise ValueError("display_minimum_area_ratio phải nằm trong [0, 1).")
         if not 1 <= self.zone_count <= 100:
             raise ValueError("zone_count phải nằm trong [1, 100].")
-        if not 0 <= self.minimum_zone_free_ratio <= 1:
-            raise ValueError("minimum_zone_free_ratio phải nằm trong [0, 1].")
+        if not 0 < self.maximum_zone_occupancy_ratio <= 1:
+            raise ValueError(
+                "maximum_zone_occupancy_ratio phải nằm trong (0, 1]."
+            )

@@ -117,10 +117,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Số đoạn bằng nhau theo chiều dọc của hành lang BEV.",
     )
     detection_parser.add_argument(
-        "--minimum-zone-free-ratio",
+        "--maximum-zone-occupancy-ratio",
         type=float,
         default=0.4,
-        help="Tỷ lệ trống tối thiểu của mọi đoạn để đánh giá có thể đi qua.",
+        help="Tỷ lệ chiếm dụng tối đa của mỗi đoạn trước khi bị chặn.",
     )
     detection_parser.add_argument("--depth-blur-kernel", type=int, default=5)
     detection_parser.add_argument(
@@ -248,7 +248,7 @@ def run_detection(args: argparse.Namespace) -> int:
         alignment_inlier_ratio=args.alignment_inlier_ratio,
         display_minimum_area_ratio=args.display_minimum_area_ratio,
         zone_count=args.zone_count,
-        minimum_zone_free_ratio=args.minimum_zone_free_ratio,
+        maximum_zone_occupancy_ratio=args.maximum_zone_occupancy_ratio,
     )
     config.validate()
     checkpoint = args.checkpoint or default_checkpoint_path(baseline.encoder)

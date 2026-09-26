@@ -162,6 +162,16 @@ class SourceRegistry:
             result = []
             for location in sorted(self._config.cameras, key=lambda item: item.order):
                 reading = self._readings.get(location.camera_id)
+                threshold = self._config.corridor.maximum_occupancy_ratio
+                measured_zones = reading.payload.zones if reading is not None else []
+                blocked_zones = [
+                    zone.index
+                    for zone in measured_zones
+                    if zone.occupancy_ratio >= threshold
+                ]
+                camera_state = reading.payload.state if reading is not None else None
+                if camera_state in ("pass", "blocked"):
+                    camera_state = "blocked" if blocked_zones else "pass"
                 result.append(
                     CameraStatus(
                         camera_id=location.camera_id,
@@ -171,21 +181,32 @@ class SourceRegistry:
                         source_id=location.source_id,
                         order=location.order,
                         location_name=location.location_name,
-                        state=reading.payload.state if reading is not None else None,
+                        state=camera_state,
                         age_ms=self._reading_age_ms(reading, now),
                         stale=self._is_stale(reading, now),
-                        blocked_zones=(
-                            list(reading.payload.blocked_zones)
+                        blocked_zones=blocked_zones,
+                        zones=(
+                            [
+                                zone.model_copy(
+                                    update={"blocked": zone.index in blocked_zones},
+                                    deep=True,
+                                )
+                                for zone in measured_zones
+                            ]
                             if reading is not None
                             else []
                         ),
-                        minimum_free_ratio=(
-                            reading.payload.minimum_free_ratio
+                        maximum_occupancy_ratio=(
+                            max(
+                                zone.occupancy_ratio
+                                for zone in measured_zones
+                            )
                             if reading is not None
+                            and measured_zones
                             else None
                         ),
-                        max_passable_width_cm=(
-                            reading.payload.max_passable_width_cm
+                        occupancy_threshold_ratio=(
+                            threshold
                             if reading is not None
                             else None
                         ),
@@ -275,30 +296,34 @@ class SourceRegistry:
                 )
                 continue
 
-            # Bước 2: Aggregator áp ngưỡng robot ngay cả khi Jetson báo pass.
-            width = reading.payload.max_passable_width_cm
-            assert width is not None
-            is_blocked = (
-                reading.payload.state == "blocked"
-                or width < self._config.corridor.required_width_cm
-            )
-            if is_blocked:
-                reason = reading.payload.reason
-                if not reason:
-                    reason = (
-                        "route_disconnected" if width <= 0 else "insufficient_clearance"
-                    )
+            # Bước 2: Aggregator tự áp ngưỡng lên tỷ lệ tổng của từng zone.
+            threshold = self._config.corridor.maximum_occupancy_ratio
+            blocked_zones = [
+                zone.index
+                for zone in reading.payload.zones
+                if zone.occupancy_ratio >= threshold
+            ]
+            if blocked_zones:
                 blocked_areas.append(
                     BlockedArea(
                         order=location.order,
                         location_name=location.location_name,
                         camera_id=location.camera_id,
                         camera_name=reading.payload.camera_name,
-                        blocked_zones=list(reading.payload.blocked_zones),
+                        blocked_zones=blocked_zones,
                         zone_count=reading.payload.zone_count or 1,
-                        minimum_free_ratio=reading.payload.minimum_free_ratio,
-                        max_passable_width_cm=width,
-                        reason=reason,
+                        zones=[
+                            zone.model_copy(
+                                update={"blocked": zone.index in blocked_zones},
+                                deep=True,
+                            )
+                            for zone in reading.payload.zones
+                        ],
+                        maximum_occupancy_ratio=max(
+                            zone.occupancy_ratio for zone in reading.payload.zones
+                        ),
+                        occupancy_threshold_ratio=threshold,
+                        reason="occupancy_threshold_exceeded",
                         source=reading.source_id,
                         observed_at=reading.payload.observed_at,
                     )
@@ -319,7 +344,9 @@ class SourceRegistry:
             corridor_name=self._config.corridor.corridor_name,
             state=state,
             can_pass=can_pass,
-            required_width_cm=self._config.corridor.required_width_cm,
+            occupancy_threshold_ratio=(
+                self._config.corridor.maximum_occupancy_ratio
+            ),
             blocked_areas=blocked_areas,
             unavailable_cameras=unavailable,
             decided_at=datetime.now(timezone.utc),

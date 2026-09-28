@@ -241,6 +241,7 @@ async function loadConfig() {
 
 function populateConfigForm() {
   const config = ui.config;
+  $("#zone-code").value = config.corridor.zone_code;
   $("#corridor-id").value = config.corridor.corridor_id;
   $("#corridor-name-input").value = config.corridor.corridor_name;
   $("#maximum-occupancy").value = config.corridor.maximum_occupancy_ratio;
@@ -281,6 +282,7 @@ function collectConfig() {
   return {
     schema_version: 1,
     corridor: {
+      zone_code: $("#zone-code").value.trim(),
       corridor_id: $("#corridor-id").value.trim(),
       corridor_name: $("#corridor-name-input").value.trim(),
       maximum_occupancy_ratio: Number($("#maximum-occupancy").value),

@@ -340,6 +340,7 @@ class SourceRegistry:
             state = "pass"
             can_pass = True
         return CorridorDecision(
+            zone_code=self._config.corridor.zone_code,
             corridor_id=self._config.corridor.corridor_id,
             corridor_name=self._config.corridor.corridor_name,
             state=state,

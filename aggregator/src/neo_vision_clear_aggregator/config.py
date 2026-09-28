@@ -16,6 +16,7 @@ class CorridorConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    zone_code: str = Field(default="ZONE_A", min_length=1, max_length=100)
     corridor_id: str = Field(min_length=1, max_length=100)
     corridor_name: str = Field(min_length=1, max_length=200)
     maximum_occupancy_ratio: float = Field(default=0.4, gt=0.0, le=1.0)

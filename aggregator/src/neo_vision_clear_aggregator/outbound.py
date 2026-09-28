@@ -11,7 +11,7 @@ from typing import Optional
 from websockets.asyncio.client import connect
 
 from neo_vision_clear_aggregator.config import OutboundConfig
-from neo_vision_clear_aggregator.models import CorridorDecision, OutboundStatus
+from neo_vision_clear_aggregator.models import CameraReportZone, CorridorDecision, OutboundStatus
 
 
 LOGGER = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class OutboundPublisher:
         self._last_sent_at: Optional[datetime] = None
         self._last_error: Optional[str] = None
         self._last_error_at: Optional[datetime] = None
-        self._last_payload: Optional[CorridorDecision] = None
+        self._last_payload: Optional[CameraReportZone] = None
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -133,15 +133,16 @@ class OutboundPublisher:
                     while True:
                         if pending is None:
                             pending = await self._queue.get()
+                        report = CameraReportZone.from_decision(pending)
                         await websocket.send(
                             json.dumps(
-                                pending.model_dump(mode="json", exclude_none=True),
+                                report.model_dump(mode="json", exclude_none=True),
                                 separators=(",", ":"),
                             )
                         )
                         self._sent_messages += 1
                         self._last_sent_at = datetime.now(timezone.utc)
-                        self._last_payload = pending.model_copy(deep=True)
+                        self._last_payload = report.model_copy(deep=True)
                         pending = None
             except asyncio.CancelledError:
                 self._connected = False

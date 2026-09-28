@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "corridor": {
+    "zone_code": "ZONE_A",
     "corridor_id": "corridor-01",
     "corridor_name": "Hàng lang test",
     "maximum_occupancy_ratio": 0.6

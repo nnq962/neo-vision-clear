@@ -171,6 +171,7 @@ class CorridorDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[2] = 2
+    zone_code: str
     corridor_id: str
     corridor_name: str
     state: Literal["pass", "blocked", "unknown"]
@@ -179,6 +180,29 @@ class CorridorDecision(BaseModel):
     blocked_areas: List[BlockedArea] = Field(default_factory=list)
     unavailable_cameras: List[UnavailableCamera] = Field(default_factory=list)
     decided_at: datetime
+
+
+class CameraReportZoneData(CorridorDecision):
+    """Số liệu hành lang kèm cờ chặn dành cho WS server đích."""
+
+    is_blocked: bool
+
+
+class CameraReportZone(BaseModel):
+    """Envelope sự kiện báo cáo một hành lang cho WS server."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["camera_report_zone"] = "camera_report_zone"
+    data: CameraReportZoneData
+
+    @classmethod
+    def from_decision(cls, decision: CorridorDecision) -> "CameraReportZone":
+        """Đổi quyết định sang sự kiện, chặn cả khi chưa đủ dữ liệu."""
+        return cls(data=CameraReportZoneData(
+            **decision.model_dump(),
+            is_blocked=decision.state != "pass",
+        ))
 
 
 class OutboundStatus(BaseModel):
@@ -194,7 +218,7 @@ class OutboundStatus(BaseModel):
     last_sent_at: Optional[datetime] = None
     last_error: Optional[str] = None
     last_error_at: Optional[datetime] = None
-    last_payload: Optional[CorridorDecision] = None
+    last_payload: Optional[CameraReportZone] = None
 
 
 class DashboardResponse(BaseModel):

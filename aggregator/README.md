@@ -14,6 +14,7 @@ trên backend; `source_id` phải trùng `NVC_JETSON_ID` của máy đang quản
 {
   "schema_version": 1,
   "corridor": {
+    "zone_code": "ZONE_A",
     "corridor_id": "corridor-01",
     "corridor_name": "Hành lang tầng 1",
     "maximum_occupancy_ratio": 0.4
@@ -100,35 +101,64 @@ Kết luận outbound khi hành lang tắc:
 
 ```json
 {
-  "schema_version": 2,
-  "corridor_id": "corridor-01",
-  "corridor_name": "Hành lang tầng 1",
-  "state": "blocked",
-  "can_pass": false,
-  "occupancy_threshold_ratio": 0.4,
-  "blocked_areas": [
-    {
-      "order": 3,
-      "location_name": "Đoạn giữa B",
-      "camera_id": "camera-03",
-      "camera_name": "Camera 3",
-      "blocked_zones": [2],
-      "zone_count": 2,
-      "zones": [
-        {"index": 1, "occupancy_ratio": 0.18, "walkway_width_cm": 200, "occupied_width_cm": 36, "free_width_cm": 164, "blocked": false},
-        {"index": 2, "occupancy_ratio": 0.56, "walkway_width_cm": 200, "occupied_width_cm": 112, "free_width_cm": 88, "blocked": true}
-      ],
-      "maximum_occupancy_ratio": 0.56,
-      "occupancy_threshold_ratio": 0.4,
-      "reason": "occupancy_threshold_exceeded",
-      "source": "jetson-b",
-      "observed_at": "2026-09-26T10:30:12.450Z"
-    }
-  ],
-  "unavailable_cameras": [],
-  "decided_at": "2026-09-26T10:30:12.500Z"
+  "event": "camera_report_zone",
+  "data": {
+    "schema_version": 2,
+    "corridor_id": "corridor-01",
+    "corridor_name": "Hành lang tầng 1",
+    "state": "blocked",
+    "can_pass": false,
+    "occupancy_threshold_ratio": 0.4,
+    "blocked_areas": [
+      {
+        "order": 3,
+        "location_name": "Đoạn giữa B",
+        "camera_id": "camera-03",
+        "camera_name": "Camera 3",
+        "blocked_zones": [
+          2
+        ],
+        "zone_count": 2,
+        "zones": [
+          {
+            "index": 1,
+            "occupancy_ratio": 0.18,
+            "walkway_width_cm": 200,
+            "occupied_width_cm": 36,
+            "free_width_cm": 164,
+            "blocked": false
+          },
+          {
+            "index": 2,
+            "occupancy_ratio": 0.56,
+            "walkway_width_cm": 200,
+            "occupied_width_cm": 112,
+            "free_width_cm": 88,
+            "blocked": true
+          }
+        ],
+        "maximum_occupancy_ratio": 0.56,
+        "occupancy_threshold_ratio": 0.4,
+        "reason": "occupancy_threshold_exceeded",
+        "source": "jetson-b",
+        "observed_at": "2026-09-26T10:30:12.450Z"
+      }
+    ],
+    "unavailable_cameras": [],
+    "decided_at": "2026-09-26T10:30:12.500Z",
+    "zone_code": "ZONE_A",
+    "is_blocked": true
+  }
 }
 ```
+
+Mỗi message outbound là JSON text với `event="camera_report_zone"`.
+`data.zone_code` lấy từ `corridor.zone_code`, đại diện cho cả hành lang; cấu hình
+cũ chưa có trường này dùng mặc định `ZONE_A`. Có thể sửa mã trong dashboard.
+`data.is_blocked=false` chỉ khi `state=pass`; `blocked` và `unknown` đều gửi
+`true` để chưa cho đi khi thiếu dữ liệu. Các số đo chi tiết được giữ trong `data`.
+`/api/decision` vẫn trả quyết định trực tiếp; `/api/outbound.last_payload` hiển thị
+envelope đã gửi. Các trường null được bỏ khỏi JSON outbound.
 
 Quy tắc tổng hợp:
 

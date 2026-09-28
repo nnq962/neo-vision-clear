@@ -129,6 +129,7 @@ class AggregatorAppTestCase(unittest.TestCase):
         updated = {
             "schema_version": 1,
             "corridor": {
+                "zone_code": "ZONE_B",
                 "corridor_id": "corridor-new",
                 "corridor_name": "Hành lang mới",
                 "maximum_occupancy_ratio": 0.55,
@@ -156,6 +157,8 @@ class AggregatorAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(saved["corridor"]["corridor_name"], "Hành lang mới")
         self.assertEqual(dashboard["decision"]["corridor_id"], "corridor-new")
+        self.assertEqual(saved["corridor"]["zone_code"], "ZONE_B")
+        self.assertEqual(dashboard["decision"]["zone_code"], "ZONE_B")
         self.assertEqual(dashboard["cameras"][0]["camera_id"], "camera-new")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -181,6 +184,7 @@ class AggregatorAppTestCase(unittest.TestCase):
             }
         )
 
+        self.assertEqual(config.corridor.zone_code, "ZONE_A")
         self.assertEqual(config.corridor.maximum_occupancy_ratio, 0.4)
         self.assertNotIn("required_width_cm", config.model_dump()["corridor"])
 

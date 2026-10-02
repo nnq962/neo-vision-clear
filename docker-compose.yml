@@ -95,7 +95,6 @@ services:
 
     volumes:
       - ./backend/data:/app/data
-      - ./backend/weights/tensorrt:/app/weights/tensorrt:ro
 
     expose:
       - "8000"

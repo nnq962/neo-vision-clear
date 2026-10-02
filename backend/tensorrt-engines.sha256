@@ -1,0 +1,12 @@
+09f6d001be425ed0573f38bcea33874c96a936d85d921cf2c108d617b762da34  weights/tensorrt/input-140/vits-b1-2-140x252.engine
+ab5dba200cc4ab40977bb2b7eb01b65424a3c76cfa83a0910662a00fa8312df9  weights/tensorrt/input-140/vits-b1-2-140x252.engine.json
+64caa6059e21f04c87bfdb612afaeb21f6940075d5d907d048f6e76bf1869869  weights/tensorrt/input-196/vits-b1-2-196x350.engine
+fde1d10568286e27619664e21c94239305bcbc618d3275ead93dba8d7c373d7f  weights/tensorrt/input-196/vits-b1-2-196x350.engine.json
+337eba9cdcc0152f45e8ead928f83ef44c08d791c929a53fe5f96ad8a285448c  weights/tensorrt/input-224/vits-b1-2-224x392.engine
+07f3193b59b4eb735a7e9c645b2d3fed33220bb27d669415242a3aa873c7c0c8  weights/tensorrt/input-224/vits-b1-2-224x392.engine.json
+46807c062c8cc3a651d0d3492698bc9d3b01f49584b0ac360ddae10d77cfe5a7  weights/tensorrt/input-280/vits-b1-2-280x504.engine
+f50b61b033ab574bf4a9911db5049543c036aa28248f772da58fd4310cb5bb23  weights/tensorrt/input-280/vits-b1-2-280x504.engine.json
+aa7d6d12cdf7dbc9619163925489cc793f1e3d209512d756832b9d7a5e96c7b3  weights/tensorrt/input-392/vits-b1-2-392x700.engine
+88f5a9ceec7093d3d30a6199baf4df044b9a4b911b26b7d8c32f39f26d91aaa7  weights/tensorrt/input-392/vits-b1-2-392x700.engine.json
+f49952b63444858e8dd5e31c111fb227ac812e92e0fb75ed10895c39d4ea33e4  weights/tensorrt/input-518/vits-b1-2-518x924.engine
+ed121d7db988cc13122ca1eb82acdc66c9c667cebba0ca4c80783f0f0663e776  weights/tensorrt/input-518/vits-b1-2-518x924.engine.json

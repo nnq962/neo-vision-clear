@@ -88,6 +88,20 @@ RUN mkdir -p /app/wheels/jp5.1.6 /app/weights/pytorch/depth-anything-v2 \
         "${DEPTH_CHECKPOINT_SHA256}" /app/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
         | sha256sum --check --strict
 
+# Pin the uploaded TensorRT engines and manifests to one Hub commit. The
+# checksum list also defines the exact set of input sizes bundled in the image.
+ARG TENSORRT_ASSET_REVISION=f67dae352869530a3215e73191fe2cd354701957
+COPY tensorrt-engines.sha256 ./
+RUN while read -r checksum artifact; do \
+        mkdir -p "$(dirname "/app/${artifact}")" \
+        && curl --fail --location --retry 5 --retry-connrefused \
+            --output "/app/${artifact}" \
+            "https://huggingface.co/quyetnguyen0188/assets/resolve/${TENSORRT_ASSET_REVISION}/${artifact}" \
+        && printf '%s  %s\n' "$checksum" "/app/${artifact}" \
+            | sha256sum --check --strict \
+        || exit 1; \
+    done < /app/tensorrt-engines.sha256
+
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install "uv==${UV_VERSION}"
 

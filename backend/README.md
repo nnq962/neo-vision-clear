@@ -230,6 +230,15 @@ một engine hỗ trợ batch 1–2. Backend tự tìm engine theo encoder và s
 baseline tạo ra. Thư mục `weights/tensorrt` không được commit. Dừng runtime
 detection trước khi build vì `trtexec` dùng GPU.
 
+Khi build Docker image, Dockerfile tải sẵn sáu engine batch 1–2 cùng manifest
+từ Hugging Face vào `/app/weights/tensorrt/input-<size>/` và kiểm tra SHA-256
+theo `tensorrt-engines.sha256`. Compose không cần mount engine từ máy host.
+Trên Jetson Xavier NX dùng JetPack 5.1.6 và TensorRT 8.5.2 tương thích, chạy
+`docker compose up -d --build backend` rồi chọn TensorRT trong Settings.
+Máy có GPU hoặc phiên bản TensorRT khác cần build lại engine cho máy đó.
+Nếu build engine mới, cần upload lên Hub, cập nhật revision và SHA-256 trong
+Dockerfile/manifest, sau đó build lại image để bản mới được đưa vào container.
+
 Với frame 960×540, các engine hiện có dùng `input_size` 140, 196, 224,
 280, 392 và 518. Mỗi kích thước có một thư mục `input-<size>` riêng:
 

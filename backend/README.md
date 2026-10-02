@@ -222,6 +222,43 @@ gửi Aggregator hoặc quyết định `pass / blocked`.
 Baseline không có `world_coordinates` sẽ bị từ chối thay vì trả số đo pixel dễ gây hiểu nhầm.
 Camera phải giữ nguyên vị trí.
 
+## Thử inference bằng TensorRT trên Jetson
+
+Nhánh thử nghiệm hỗ trợ TensorRT FP16 cho **worker detection**; calibration vẫn
+dùng PyTorch. Engine là graph tĩnh, phải build trên Jetson sẽ chạy nó và khớp
+`encoder`, `input_size`, kích thước frame và số camera trong batch. Thư mục
+`weights/tensorrt` không được commit. Dừng runtime detection trước khi build vì
+`trtexec` dùng GPU và có thể làm chậm các camera đang chạy.
+
+Ví dụ cho hai baseline hiện tại (`vits`, frame 960×540, `input_size=280`, batch 2):
+
+```bash
+cd backend
+uv sync --extra tensorrt-export
+uv run --extra tensorrt-export python -m walkway_monitor.depth.tensorrt_build \
+  --checkpoint weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
+  --encoder vits --input-size 280 \
+  --frame-width 960 --frame-height 540 --batch 2 \
+  --engine weights/tensorrt/vits-b2-280x504.engine
+```
+
+Lệnh tạo ONNX opset 16, TensorRT engine FP16 và manifest `.engine.json`.
+TensorRT 8.5.2 trên JetPack hiện tại không parse được graph opset 17 vì
+`LayerNormalization`. Runtime kiểm tra manifest, checkpoint và shape trước khi
+suy luận; không tự chuyển sang PyTorch nếu engine sai.
+
+Để thử trong Docker Compose, đặt trong `.env` ở thư mục gốc:
+
+```env
+NVC_DEPTH_BACKEND=tensorrt
+NVC_TENSORRT_ENGINE_PATH=/app/weights/tensorrt/vits-b2-280x504.engine
+```
+
+Sau đó build lại backend và start runtime từ dashboard. Muốn quay về đường chạy
+hiện tại, đặt `NVC_DEPTH_BACKEND=pytorch`, build lại backend và start runtime.
+Trước khi dùng kết quả để quyết định hành lang, cần so depth map và trạng thái
+zone trên cùng frame giữa PyTorch và TensorRT, rồi đo FPS/latency cả pipeline.
+
 ## FastAPI server và WebSocket
 
 Package `server` nằm độc lập với `walkway_monitor`. FastAPI chỉ khởi tạo các

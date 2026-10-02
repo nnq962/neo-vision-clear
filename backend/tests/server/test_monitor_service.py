@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -198,6 +199,37 @@ class MonitorServiceTestCase(unittest.TestCase):
         self.assertEqual(pipeline.sources, [service._camera_stream_url(self.camera.id)])
         service.stop(wait=False)
         self._wait_for_status(service, "stopped")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_tensorrt_setting_selects_engine_for_runtime(self) -> None:
+        """Worker TensorRT dùng engine đã khai báo thay vì estimator PyTorch."""
+        pipeline = BlockingPipeline()
+        received_options: dict[str, object] = {}
+
+        def create_tensorrt(**options):
+            """Ghi nhận tham số TensorRT mà worker truyền vào."""
+            received_options.update(options)
+            return object()
+
+        settings = replace(
+            self._settings(),
+            depth_backend="tensorrt",
+            tensorrt_engine_path="/tmp/model.engine",
+        )
+        service = MonitorService(
+            settings,
+            estimator_factory=lambda **_kwargs: self.fail("Đã gọi PyTorch"),
+            pipeline_factory=lambda **_kwargs: pipeline,
+        )
+        with patch("server.services.monitor.TensorRTDepthEstimator", create_tensorrt):
+            service.start([self.camera], [self.baseline], self.runtime)
+            self.assertTrue(pipeline.started.wait(timeout=1.0))
+            self.assertEqual(received_options["engine_path"], "/tmp/model.engine")
+            self.assertEqual(received_options["encoder"], "vits")
+            self.assertEqual(received_options["input_size"], 518)
+            service.stop(wait=False)
+            self._wait_for_status(service, "stopped")
 
     # ─────────────────────────────────────────────────────────────────────────
 

@@ -9,6 +9,27 @@ from .util.blocks import FeatureFusionBlock, _make_scratch
 from .util.transform import Resize, NormalizeImage, PrepareForNet
 
 
+def prepare_image(raw_image, input_size=518):
+    """Tiền xử lý ảnh BGR giống nhau cho PyTorch và TensorRT."""
+    transform = Compose([
+        Resize(
+            width=input_size,
+            height=input_size,
+            resize_target=False,
+            keep_aspect_ratio=True,
+            ensure_multiple_of=14,
+            resize_method='lower_bound',
+            image_interpolation_method=cv2.INTER_CUBIC,
+        ),
+        NormalizeImage(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        PrepareForNet(),
+    ])
+    height, width = raw_image.shape[:2]
+    image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB) / 255.0
+    image = transform({'image': image})['image']
+    return torch.from_numpy(image), (height, width)
+
+
 def _make_fusion_block(features, use_bn, size=None):
     return FeatureFusionBlock(
         features,
@@ -230,25 +251,5 @@ class DepthAnythingV2(nn.Module):
 
     def _prepare_image(self, raw_image, input_size=518):
         """Tiền xử lý một ảnh BGR thành tensor CHW trên CPU."""
-        transform = Compose([
-            Resize(
-                width=input_size,
-                height=input_size,
-                resize_target=False,
-                keep_aspect_ratio=True,
-                ensure_multiple_of=14,
-                resize_method='lower_bound',
-                image_interpolation_method=cv2.INTER_CUBIC,
-            ),
-            NormalizeImage(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            PrepareForNet(),
-        ])
-        
-        h, w = raw_image.shape[:2]
-        
-        image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB) / 255.0
-        
-        image = transform({'image': image})['image']
         # Giữ tensor trên CPU để caller có thể stack cả batch trước khi transfer.
-        image = torch.from_numpy(image)
-        return image, (h, w)
+        return prepare_image(raw_image, input_size)

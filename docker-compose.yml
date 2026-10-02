@@ -84,6 +84,8 @@ services:
       NVC_CONFIG_PATH: /app/data/config.json
       NVC_BASELINES_PATH: /app/data/baselines
       WALKWAY_CHECKPOINT: /app/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth
+      NVC_DEPTH_BACKEND: "${NVC_DEPTH_BACKEND:-pytorch}"
+      NVC_TENSORRT_ENGINE_PATH: "${NVC_TENSORRT_ENGINE_PATH:-}"
       WALKWAY_HOST: 0.0.0.0
       WALKWAY_PORT: "8000"
       NVC_JETSON_ID: "${NVC_JETSON_ID:-jetson-a}"
@@ -94,6 +96,7 @@ services:
 
     volumes:
       - ./backend/data:/app/data
+      - ./backend/weights/tensorrt:/app/weights/tensorrt:ro
 
     expose:
       - "8000"

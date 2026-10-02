@@ -19,6 +19,8 @@ class ServerSettings:
     baselines_directory: str = DEFAULT_BASELINES_DIRECTORY
     mediamtx_rtsp_url: str = "rtsp://127.0.0.1:8554"
     checkpoint_path: str | None = None
+    depth_backend: str = "pytorch"
+    tensorrt_engine_path: str | None = None
     host: str = "0.0.0.0"
     port: int = 8000
     snapshot_max_age_seconds: float = 2.0
@@ -50,6 +52,10 @@ class ServerSettings:
                 "rtsp://127.0.0.1:8554",
             ),
             checkpoint_path=checkpoint,
+            depth_backend=os.getenv("NVC_DEPTH_BACKEND", "pytorch").strip().lower(),
+            tensorrt_engine_path=(
+                os.getenv("NVC_TENSORRT_ENGINE_PATH", "").strip() or None
+            ),
             host=os.getenv("WALKWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("WALKWAY_PORT", "8000")),
             snapshot_max_age_seconds=float(
@@ -75,6 +81,10 @@ class ServerSettings:
             raise ValueError("baselines_directory không được để trống.")
         if not self.mediamtx_rtsp_url.strip():
             raise ValueError("mediamtx_rtsp_url không được để trống.")
+        if self.depth_backend not in ("pytorch", "tensorrt"):
+            raise ValueError("depth_backend phải là pytorch hoặc tensorrt.")
+        if self.depth_backend == "tensorrt" and not self.tensorrt_engine_path:
+            raise ValueError("NVC_TENSORRT_ENGINE_PATH là bắt buộc với TensorRT.")
         if not 1 <= self.port <= 65535:
             raise ValueError("port phải nằm trong [1, 65535].")
         if self.snapshot_max_age_seconds <= 0:

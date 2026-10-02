@@ -98,7 +98,9 @@ COPY src ./src
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev \
-    && mkdir -p /app/data/baselines
+    && mkdir -p /app/data/baselines \
+    && ln -s /usr/lib/python3.8/dist-packages/tensorrt \
+        /opt/venv/lib/python3.8/site-packages/tensorrt
 
 # Nạp GLdispatch trước Python/Torch để plugin GStreamer NVIDIA trên Jetson
 # không bị lỗi "cannot allocate memory in static TLS block" khi mở camera.

@@ -50,6 +50,7 @@ import { saveRuntimeConfig } from "./actions"
 
 const DEFAULT_RUNTIME: RuntimeConfig = {
   enabled: false,
+  modelBackend: "auto",
   activeBaselineIds: [],
   snapshotMaxAgeSeconds: 2,
   logIntervalSeconds: 2,
@@ -131,7 +132,8 @@ export function RuntimeSettingsForm({
     selectedBaselines.map((baseline) => [baseline.cameraId, baseline])
   )
   const batchSize = selectedBaselines.length
-  const canEnable = batchSize > 0
+  const invalidTensorRTBatch = runtime.modelBackend === "tensorrt" && batchSize > 2
+  const canEnable = batchSize > 0 && !invalidTensorRTBatch
 
   function cameraBaselines(cameraId: string) {
     const anchor = selectedBaselines.find(
@@ -222,6 +224,7 @@ export function RuntimeSettingsForm({
     }
     setRuntime((current) => ({
       ...current,
+      modelBackend: DEFAULT_RUNTIME.modelBackend,
       snapshotMaxAgeSeconds: DEFAULT_RUNTIME.snapshotMaxAgeSeconds,
       logIntervalSeconds: DEFAULT_RUNTIME.logIntervalSeconds,
       detection: DEFAULT_RUNTIME.detection,
@@ -261,12 +264,20 @@ export function RuntimeSettingsForm({
         </Alert>
       ) : null}
 
+      {invalidTensorRTBatch ? (
+        <Alert variant="destructive">
+          <AlertTitle>Batch TensorRT vượt giới hạn</AlertTitle>
+          <AlertDescription>Chọn tối đa 2 camera hoặc đổi sang PyTorch.</AlertDescription>
+        </Alert>
+      ) : null}
+
       <form
         ref={formRef}
         action={handleSubmit}
         className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem] 2xl:grid-cols-[minmax(0,1fr)_22rem]"
       >
         <input type="hidden" name="enabled" value={String(runtime.enabled)} />
+        <input type="hidden" name="model_backend" value={runtime.modelBackend} />
         <input
           type="hidden"
           name="active_baseline_ids"
@@ -511,6 +522,39 @@ export function RuntimeSettingsForm({
               <CardDescription>Trạng thái của cấu hình đang chọn.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="model-backend">Model suy luận</Label>
+                <Select
+                  items={[
+                    { label: "Theo cấu hình server", value: "auto" },
+                    { label: "Depth Anything V2 · PyTorch", value: "pytorch" },
+                    { label: "Depth Anything V2 · TensorRT", value: "tensorrt" },
+                  ]}
+                  value={runtime.modelBackend}
+                  onValueChange={(value) => {
+                    if (value === "auto" || value === "pytorch" || value === "tensorrt") {
+                      setRuntime((current) => ({ ...current, modelBackend: value }))
+                    }
+                  }}
+                >
+                  <SelectTrigger id="model-backend" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>Backend depth</SelectLabel>
+                      <SelectItem value="auto">Theo cấu hình server</SelectItem>
+                      <SelectItem value="pytorch">Depth Anything V2 · PyTorch</SelectItem>
+                      <SelectItem value="tensorrt">Depth Anything V2 · TensorRT</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  TensorRT tự chọn engine theo kích thước input của baseline; hỗ trợ 1–2 camera.
+                  Áp dụng khi khởi động runtime lần tiếp theo.
+                </p>
+              </div>
+              <Separator />
               <div className="flex items-center justify-between gap-4">
                 <span className="text-muted-foreground">Camera trong batch</span>
                 <Badge variant="secondary">

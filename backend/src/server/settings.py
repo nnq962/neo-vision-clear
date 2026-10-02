@@ -9,6 +9,7 @@ from pathlib import Path
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = str(BACKEND_DIRECTORY / "data" / "config.json")
 DEFAULT_BASELINES_DIRECTORY = str(BACKEND_DIRECTORY / "data" / "baselines")
+DEFAULT_TENSORRT_ENGINE_DIRECTORY = str(BACKEND_DIRECTORY / "weights" / "tensorrt")
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class ServerSettings:
     checkpoint_path: str | None = None
     depth_backend: str = "pytorch"
     tensorrt_engine_path: str | None = None
+    tensorrt_engine_directory: str = DEFAULT_TENSORRT_ENGINE_DIRECTORY
     host: str = "0.0.0.0"
     port: int = 8000
     snapshot_max_age_seconds: float = 2.0
@@ -56,6 +58,9 @@ class ServerSettings:
             tensorrt_engine_path=(
                 os.getenv("NVC_TENSORRT_ENGINE_PATH", "").strip() or None
             ),
+            tensorrt_engine_directory=os.getenv(
+                "NVC_TENSORRT_ENGINE_DIRECTORY", DEFAULT_TENSORRT_ENGINE_DIRECTORY
+            ),
             host=os.getenv("WALKWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("WALKWAY_PORT", "8000")),
             snapshot_max_age_seconds=float(
@@ -83,8 +88,8 @@ class ServerSettings:
             raise ValueError("mediamtx_rtsp_url không được để trống.")
         if self.depth_backend not in ("pytorch", "tensorrt"):
             raise ValueError("depth_backend phải là pytorch hoặc tensorrt.")
-        if self.depth_backend == "tensorrt" and not self.tensorrt_engine_path:
-            raise ValueError("NVC_TENSORRT_ENGINE_PATH là bắt buộc với TensorRT.")
+        if not self.tensorrt_engine_directory.strip():
+            raise ValueError("tensorrt_engine_directory không được để trống.")
         if not 1 <= self.port <= 65535:
             raise ValueError("port phải nằm trong [1, 65535].")
         if self.snapshot_max_age_seconds <= 0:

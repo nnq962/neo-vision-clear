@@ -21,7 +21,10 @@ from walkway_monitor.calibration.storage import (
 )
 from walkway_monitor.config import default_checkpoint_path
 from walkway_monitor.depth.estimator import DepthAnythingEstimator, DepthEstimator
-from walkway_monitor.depth.tensorrt_estimator import TensorRTDepthEstimator
+from walkway_monitor.depth.tensorrt_estimator import (
+    TensorRTDepthEstimator,
+    dynamic_engine_path,
+)
 from walkway_monitor.detection.models import DetectionOutput
 from walkway_monitor.detection.camera_batch_pipeline import CameraBatchDetectionPipeline
 from walkway_monitor.detection.zones import extract_difference_zones
@@ -207,9 +210,26 @@ class MonitorService:
                 self.settings.checkpoint_path
                 or default_checkpoint_path(primary_baseline.encoder)
             )
-            if self.settings.depth_backend == "tensorrt":
+            model_backend = (
+                self.settings.depth_backend
+                if runtime.model_backend == "auto"
+                else runtime.model_backend
+            )
+            if model_backend == "tensorrt":
+                engine_path = (
+                    self.settings.tensorrt_engine_path
+                    if runtime.model_backend == "auto"
+                    and self.settings.tensorrt_engine_path
+                    else dynamic_engine_path(
+                        self.settings.tensorrt_engine_directory,
+                        primary_baseline.encoder,
+                        primary_baseline.input_size,
+                        primary_baseline.frame_width,
+                        primary_baseline.frame_height,
+                    )
+                )
                 estimator = TensorRTDepthEstimator(
-                    engine_path=self.settings.tensorrt_engine_path,
+                    engine_path=engine_path,
                     checkpoint=checkpoint,
                     encoder=primary_baseline.encoder,
                     input_size=primary_baseline.input_size,

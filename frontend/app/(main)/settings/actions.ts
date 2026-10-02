@@ -50,6 +50,7 @@ export async function saveRuntimeConfig(
   }
   const runtime: RuntimeConfig = {
     enabled: formData.get("enabled") === "true",
+    modelBackend: String(formData.get("model_backend")) as RuntimeConfig["modelBackend"],
     activeBaselineIds,
     snapshotMaxAgeSeconds: readNumber(formData, "snapshot_max_age_seconds"),
     logIntervalSeconds: readNumber(formData, "log_interval_seconds"),
@@ -89,9 +90,16 @@ export async function saveRuntimeConfig(
       message: "Hãy chọn baseline trước khi bật runtime.",
     }
   }
+  if (!["auto", "pytorch", "tensorrt"].includes(runtime.modelBackend)) {
+    return { status: "error", message: "Model suy luận không hợp lệ." }
+  }
+  if (runtime.modelBackend === "tensorrt" && runtime.activeBaselineIds.length > 2) {
+    return { status: "error", message: "TensorRT chỉ hỗ trợ tối đa 2 camera." }
+  }
 
   const body = {
     enabled: runtime.enabled,
+    model_backend: runtime.modelBackend,
     active_baseline_ids: runtime.activeBaselineIds,
     snapshot_max_age_seconds: runtime.snapshotMaxAgeSeconds,
     log_interval_seconds: runtime.logIntervalSeconds,

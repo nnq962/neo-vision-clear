@@ -62,6 +62,7 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     enabled: bool = False
+    model_backend: Literal["auto", "pytorch", "tensorrt"] = "auto"
     active_baseline_ids: list[str] = Field(default_factory=list, max_length=32)
     snapshot_max_age_seconds: float = Field(default=2.0, gt=0)
     log_interval_seconds: float = Field(default=2.0, ge=0)
@@ -79,6 +80,8 @@ class RuntimeConfig(BaseModel):
         # Bước 2: runtime tắt được phép chưa chọn baseline để cấu hình ban đầu.
         if self.enabled and not self.active_baseline_ids:
             raise ValueError("Runtime đang bật phải có active_baseline_ids.")
+        if self.model_backend == "tensorrt" and len(self.active_baseline_ids) > 2:
+            raise ValueError("TensorRT chỉ hỗ trợ batch gồm 1 hoặc 2 camera.")
 
         return self
 

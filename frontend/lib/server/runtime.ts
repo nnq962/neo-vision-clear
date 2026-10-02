@@ -2,6 +2,7 @@ import type { RuntimeConfig, RuntimeProcessStatus } from "@/lib/types/runtime"
 
 type RuntimeApiPayload = {
   enabled: boolean
+  model_backend: "auto" | "pytorch" | "tensorrt"
   active_baseline_ids: string[]
   snapshot_max_age_seconds: number
   log_interval_seconds: number
@@ -35,6 +36,7 @@ export const DEFAULT_RUNTIME_PROCESS_STATUS: RuntimeProcessStatus = {
 
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   enabled: false,
+  modelBackend: "auto",
   activeBaselineIds: [],
   snapshotMaxAgeSeconds: 2,
   logIntervalSeconds: 2,
@@ -63,6 +65,9 @@ function isRuntimeApiPayload(value: unknown): value is RuntimeApiPayload {
   const detector = detection as Record<string, unknown>
   return (
     typeof payload.enabled === "boolean" &&
+    (payload.model_backend === "auto" ||
+      payload.model_backend === "pytorch" ||
+      payload.model_backend === "tensorrt") &&
     Array.isArray(payload.active_baseline_ids) &&
     payload.active_baseline_ids.every((item) => typeof item === "string") &&
     typeof payload.snapshot_max_age_seconds === "number" &&
@@ -127,6 +132,7 @@ export function mapRuntimeProcessStatus(
 export function mapRuntimeConfig(payload: RuntimeApiPayload): RuntimeConfig {
   return {
     enabled: payload.enabled,
+    modelBackend: payload.model_backend,
     activeBaselineIds: payload.active_baseline_ids,
     snapshotMaxAgeSeconds: payload.snapshot_max_age_seconds,
     logIntervalSeconds: payload.log_interval_seconds,

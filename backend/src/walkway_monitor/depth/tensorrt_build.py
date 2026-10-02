@@ -1,4 +1,4 @@
-"""Xuất Depth Anything V2 sang ONNX và build TensorRT engine tĩnh."""
+"""Xuất Depth Anything V2 sang ONNX và build TensorRT engine."""
 
 from __future__ import annotations
 
@@ -23,7 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-size", type=int, required=True)
     parser.add_argument("--frame-width", type=int, required=True)
     parser.add_argument("--frame-height", type=int, required=True)
-    parser.add_argument("--batch", type=int, required=True)
+    batch = parser.add_mutually_exclusive_group(required=True)
+    batch.add_argument("--batch", type=int)
+    batch.add_argument("--dynamic-batch", type=int, choices=(2,))
     parser.add_argument("--engine", type=Path, required=True)
     parser.add_argument(
         "--trtexec",
@@ -36,7 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     """Xuất ONNX opset 16, build engine FP16 và lưu manifest kiểm tra."""
     args = build_parser().parse_args(argv)
-    if min(args.input_size, args.frame_width, args.frame_height, args.batch) <= 0:
+    maximum_batch = args.batch if args.batch is not None else args.dynamic_batch
+    if min(args.input_size, args.frame_width, args.frame_height, maximum_batch) <= 0:
         raise ValueError("Kích thước ảnh và batch phải là số dương.")
     if not args.checkpoint.is_file():
         raise FileNotFoundError(args.checkpoint)
@@ -50,8 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     # Bước 1: lấy shape thực bằng đúng transform của pipeline PyTorch.
     frame = np.zeros((args.frame_height, args.frame_width, 3), dtype=np.uint8)
     image, _size = prepare_image(frame, args.input_size)
-    input_shape = [args.batch] + list(image.shape)
-    example = torch.zeros(input_shape, dtype=torch.float32)
+    input_shape = [(-1 if args.dynamic_batch else maximum_batch)] + list(image.shape)
+    example = torch.zeros([maximum_batch] + list(image.shape), dtype=torch.float32)
 
     # Bước 2: dùng opset 16 vì TensorRT 8.5.2 chưa parse được LayerNormalization
     # nguyên khối mà exporter tạo ra ở opset 17.
@@ -70,22 +73,34 @@ def main(argv: list[str] | None = None) -> int:
             input_names=["input"],
             output_names=["depth"],
             do_constant_folding=True,
+            dynamic_axes=(
+                {"input": {0: "batch"}, "depth": {0: "batch"}}
+                if args.dynamic_batch
+                else None
+            ),
         )
     onnx.checker.check_model(str(onnx_path))
     del model
 
     # Bước 3: build engine trên chính Jetson sẽ chạy inference.
-    subprocess.run(
-        [
-            str(args.trtexec),
-            f"--onnx={onnx_path}",
-            f"--saveEngine={args.engine}",
-            "--fp16",
-            "--buildOnly",
-            "--memPoolSize=workspace:512",
-        ],
-        check=True,
-    )
+    command = [
+        str(args.trtexec),
+        f"--onnx={onnx_path}",
+        f"--saveEngine={args.engine}",
+        "--fp16",
+        "--buildOnly",
+        "--memPoolSize=workspace:512",
+    ]
+    if args.dynamic_batch:
+        spatial = "x".join(map(str, input_shape[1:]))
+        command.extend(
+            [
+                f"--minShapes=input:1x{spatial}",
+                f"--optShapes=input:2x{spatial}",
+                f"--maxShapes=input:2x{spatial}",
+            ]
+        )
+    subprocess.run(command, check=True)
     if not args.engine.is_file():
         raise RuntimeError("trtexec không tạo TensorRT engine.")
 
@@ -98,13 +113,15 @@ def main(argv: list[str] | None = None) -> int:
                 break
             digest.update(chunk)
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2 if args.dynamic_batch else 1,
         "encoder": args.encoder,
         "input_size": args.input_size,
         "input_shape": input_shape,
         "precision": "fp16",
         "checkpoint_sha256": digest.hexdigest(),
     }
+    if args.dynamic_batch:
+        metadata.update({"min_batch": 1, "max_batch": 2})
     Path(f"{args.engine}.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

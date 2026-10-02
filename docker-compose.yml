@@ -86,6 +86,7 @@ services:
       WALKWAY_CHECKPOINT: /app/weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth
       NVC_DEPTH_BACKEND: "${NVC_DEPTH_BACKEND:-pytorch}"
       NVC_TENSORRT_ENGINE_PATH: "${NVC_TENSORRT_ENGINE_PATH:-}"
+      NVC_TENSORRT_ENGINE_DIRECTORY: "${NVC_TENSORRT_ENGINE_DIRECTORY:-/app/weights/tensorrt}"
       WALKWAY_HOST: 0.0.0.0
       WALKWAY_PORT: "8000"
       NVC_JETSON_ID: "${NVC_JETSON_ID:-jetson-a}"

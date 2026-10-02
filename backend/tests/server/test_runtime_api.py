@@ -152,6 +152,7 @@ class RuntimeApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["enabled"])
+        self.assertEqual(response.json()["model_backend"], "auto")
         self.assertEqual(response.json()["active_baseline_ids"], [])
         self.assertNotIn("inference_batch_size", response.json())
         self.assertEqual(response.json()["detection"]["noise_multiplier"], 6.0)
@@ -169,6 +170,7 @@ class RuntimeApiTestCase(unittest.TestCase):
         baseline = self._create_baseline()
         payload = {
             "enabled": True,
+            "model_backend": "tensorrt",
             "active_baseline_ids": [baseline["id"]],
             "snapshot_max_age_seconds": 3.0,
             "log_interval_seconds": 1.0,

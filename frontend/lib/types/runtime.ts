@@ -14,6 +14,7 @@ export type RuntimeDetectionConfig = {
 
 export type RuntimeConfig = {
   enabled: boolean
+  modelBackend: "auto" | "pytorch" | "tensorrt"
   activeBaselineIds: string[]
   snapshotMaxAgeSeconds: number
   logIntervalSeconds: number

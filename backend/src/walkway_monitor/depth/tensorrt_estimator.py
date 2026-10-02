@@ -1,4 +1,4 @@
-"""Adapter TensorRT cho Depth Anything V2 với graph tĩnh."""
+"""Adapter TensorRT cho Depth Anything V2 với batch tĩnh hoặc động."""
 
 from __future__ import annotations
 
@@ -30,12 +30,16 @@ def read_engine_metadata(
         )
     with metadata_path.open(encoding="utf-8") as source:
         metadata = json.load(source)
-    if metadata.get("schema_version") != 1:
+    if metadata.get("schema_version") not in (1, 2):
         raise ValueError("Schema manifest TensorRT không được hỗ trợ.")
     if metadata.get("encoder") != encoder or metadata.get("input_size") != input_size:
         raise ValueError("Engine TensorRT không khớp encoder hoặc input_size của baseline.")
     if metadata.get("precision") != "fp16":
         raise ValueError("Manifest TensorRT phải khai báo precision=fp16.")
+    if metadata["schema_version"] == 2 and (
+        metadata.get("min_batch") != 1 or metadata.get("max_batch") != 2
+    ):
+        raise ValueError("Engine TensorRT batch động phải hỗ trợ batch 1–2.")
     if checkpoint is not None:
         digest = hashlib.sha256()
         with Path(checkpoint).open("rb") as source:
@@ -47,6 +51,24 @@ def read_engine_metadata(
         if digest.hexdigest() != metadata.get("checkpoint_sha256"):
             raise ValueError("Engine TensorRT được build từ checkpoint khác.")
     return metadata
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def dynamic_engine_path(
+    directory: str | Path,
+    encoder: str,
+    input_size: int,
+    frame_width: int,
+    frame_height: int,
+) -> Path:
+    """Tìm engine batch 1–2 theo shape do chính preprocessing tạo ra."""
+    # Bước 1: dùng cùng transform với inference để tránh đoán chiều ngang.
+    frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+    image, _size = prepare_image(frame, input_size)
+    height, width = image.shape[1:]
+    return Path(directory) / f"{encoder}-b1-2-{height}x{width}.engine"
 
 
 class TensorRTDepthEstimator:
@@ -61,7 +83,7 @@ class TensorRTDepthEstimator:
         input_size: int,
         checkpoint: str | Path | None = None,
     ):
-        """Nạp engine đã build cho đúng encoder, input size và shape tĩnh."""
+        """Nạp engine đã build cho đúng encoder, input size và profile batch."""
         path = Path(engine_path)
         metadata = read_engine_metadata(path, encoder, input_size, checkpoint)
         if not torch.cuda.is_available():
@@ -94,6 +116,19 @@ class TensorRTDepthEstimator:
             self._input_shape[0], self._input_shape[2], self._input_shape[3]
         ):
             raise ValueError("Output TensorRT không khớp shape depth dự kiến.")
+        self._dynamic_batch = self._input_shape[0] == -1
+        if self._dynamic_batch:
+            if metadata["schema_version"] != 2:
+                raise ValueError("Engine batch động cần manifest schema 2.")
+            minimum, _optimal, maximum = self._engine.get_profile_shape(
+                0, self._input_index
+            )
+            if minimum != (1,) + self._input_shape[1:] or maximum != (
+                2,
+            ) + self._input_shape[1:]:
+                raise ValueError("Profile engine TensorRT phải hỗ trợ batch 1–2.")
+        elif metadata["schema_version"] != 1:
+            raise ValueError("Engine batch tĩnh cần manifest schema 1.")
         if self._engine.get_binding_dtype(self._input_index) != trt.float32:
             raise ValueError("Engine TensorRT cần input float32.")
         output_dtype = self._engine.get_binding_dtype(self._output_index)
@@ -117,7 +152,7 @@ class TensorRTDepthEstimator:
     # ─────────────────────────────────────────────────────────────────────────
 
     def predict_batch(self, frames: Sequence[np.ndarray]) -> list[np.ndarray]:
-        """Suy luận một batch tĩnh và resize depth về từng frame gốc."""
+        """Suy luận batch 1–2 hoặc batch tĩnh và resize depth về từng frame."""
         normalized_frames = list(frames)
         if not normalized_frames:
             raise ValueError("Batch frame không được rỗng.")
@@ -130,7 +165,13 @@ class TensorRTDepthEstimator:
         tensors = [item[0] for item in prepared]
         sizes = [item[1] for item in prepared]
         actual_shape = (len(tensors),) + tuple(tensors[0].shape)
-        if actual_shape != self._input_shape or any(
+        expected_spatial = self._input_shape[1:]
+        valid_batch = (
+            1 <= len(tensors) <= 2
+            if self._dynamic_batch
+            else len(tensors) == self._input_shape[0]
+        )
+        if not valid_batch or actual_shape[1:] != expected_spatial or any(
             tensor.shape != tensors[0].shape for tensor in tensors[1:]
         ):
             raise ValueError(
@@ -140,8 +181,19 @@ class TensorRTDepthEstimator:
         # Bước 2: Torch cấp phát CUDA buffer và TensorRT chạy trên cùng stream.
         with torch.no_grad():
             inputs = torch.stack(tensors).to(device="cuda")
+            if self._dynamic_batch and not self._context.set_binding_shape(
+                self._input_index, actual_shape
+            ):
+                raise RuntimeError(f"TensorRT không nhận shape {actual_shape}.")
+            output_shape = (
+                tuple(self._context.get_binding_shape(self._output_index))
+                if self._dynamic_batch
+                else self._output_shape
+            )
+            if output_shape != (len(tensors), *actual_shape[2:]):
+                raise RuntimeError("TensorRT trả về output shape không hợp lệ.")
             outputs = torch.empty(
-                self._output_shape,
+                output_shape,
                 dtype=self._output_torch_dtype,
                 device="cuda",
             )

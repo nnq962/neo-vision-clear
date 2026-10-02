@@ -233,6 +233,41 @@ class MonitorServiceTestCase(unittest.TestCase):
 
     # ─────────────────────────────────────────────────────────────────────────
 
+    def test_runtime_selection_uses_dynamic_engine_for_baseline_shape(self) -> None:
+        """Lựa chọn TensorRT trong runtime tìm engine theo frame và input size."""
+        pipeline = BlockingPipeline()
+        received_options: dict[str, object] = {}
+
+        def create_tensorrt(**options):
+            """Ghi lại đường dẫn engine mà worker chuẩn bị nạp."""
+            received_options.update(options)
+            return object()
+
+        baseline = SimpleNamespace(
+            encoder="vits", input_size=280, frame_width=960, frame_height=540
+        )
+        runtime = self.runtime.model_copy(update={"model_backend": "tensorrt"})
+        settings = replace(
+            self._settings(), tensorrt_engine_directory=str(self.baselines_directory)
+        )
+        service = MonitorService(
+            settings,
+            estimator_factory=lambda **_kwargs: self.fail("Đã gọi PyTorch"),
+            pipeline_factory=lambda **_kwargs: pipeline,
+        )
+        with patch("server.services.monitor.load_baseline", return_value=baseline):
+            with patch("server.services.monitor.TensorRTDepthEstimator", create_tensorrt):
+                service.start([self.camera], [self.baseline], runtime)
+                self.assertTrue(pipeline.started.wait(timeout=1.0))
+                self.assertEqual(
+                    received_options["engine_path"],
+                    self.baselines_directory / "vits-b1-2-280x504.engine",
+                )
+                service.stop(wait=False)
+                self._wait_for_status(service, "stopped")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def test_multiple_cameras_use_shared_camera_batch_pipeline(self) -> None:
         """Worker dùng cùng pipeline cho toàn bộ camera trong batch."""
         second_camera = self.camera.model_copy(

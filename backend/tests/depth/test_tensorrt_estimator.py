@@ -11,7 +11,10 @@ import unittest
 import numpy as np
 
 from depth_anything_v2.dpt import prepare_image
-from walkway_monitor.depth.tensorrt_estimator import read_engine_metadata
+from walkway_monitor.depth.tensorrt_estimator import (
+    dynamic_engine_path,
+    read_engine_metadata,
+)
 
 
 class TensorRTMetadataTestCase(unittest.TestCase):
@@ -52,6 +55,15 @@ class TensorRTMetadataTestCase(unittest.TestCase):
             checkpoint.write_bytes(b"different")
             with self.assertRaisesRegex(ValueError, "checkpoint khác"):
                 read_engine_metadata(engine, "vits", 280, checkpoint)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def test_dynamic_engine_path_uses_preprocessing_shape(self) -> None:
+        """Các input size hiện có ánh xạ đúng bốn engine batch động."""
+        for size, width in ((140, 252), (196, 350), (224, 392), (280, 504)):
+            with self.subTest(size=size):
+                path = dynamic_engine_path("/models", "vits", size, 960, 540)
+                self.assertEqual(path.name, f"vits-b1-2-{size}x{width}.engine")
 
 
 if __name__ == "__main__":

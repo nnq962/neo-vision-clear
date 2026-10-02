@@ -224,22 +224,26 @@ Camera phải giữ nguyên vị trí.
 
 ## Thử inference bằng TensorRT trên Jetson
 
-Nhánh thử nghiệm hỗ trợ TensorRT FP16 cho **worker detection**; calibration vẫn
-dùng PyTorch. Engine là graph tĩnh, phải build trên Jetson sẽ chạy nó và khớp
-`encoder`, `input_size`, kích thước frame và số camera trong batch. Thư mục
-`weights/tensorrt` không được commit. Dừng runtime detection trước khi build vì
-`trtexec` dùng GPU và có thể làm chậm các camera đang chạy.
+Worker detection hỗ trợ chọn PyTorch hoặc TensorRT FP16 tại **Cài đặt → Runtime →
+Model suy luận**; calibration vẫn dùng PyTorch. Với TensorRT, mỗi input shape cần
+một engine hỗ trợ batch 1–2. Backend tự tìm engine theo encoder và shape do
+baseline tạo ra. Thư mục `weights/tensorrt` không được commit. Dừng runtime
+detection trước khi build vì `trtexec` dùng GPU.
 
-Ví dụ cho hai baseline hiện tại (`vits`, frame 960×540, `input_size=280`, batch 2):
+Các baseline 960×540 hiện có dùng `input_size` 140, 196, 224 hoặc 280. Build
+một engine batch động cho mỗi kích thước:
 
 ```bash
 cd backend
 uv sync --extra tensorrt-export
-uv run --extra tensorrt-export python -m walkway_monitor.depth.tensorrt_build \
-  --checkpoint weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
-  --encoder vits --input-size 280 \
-  --frame-width 960 --frame-height 540 --batch 2 \
-  --engine weights/tensorrt/vits-b2-280x504.engine
+for shape in 140x252 196x350 224x392 280x504; do
+  size=${shape%x*}
+  uv run --extra tensorrt-export python -m walkway_monitor.depth.tensorrt_build \
+    --checkpoint weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
+    --encoder vits --input-size "$size" \
+    --frame-width 960 --frame-height 540 --dynamic-batch 2 \
+    --engine "weights/tensorrt/vits-b1-2-${shape}.engine"
+done
 ```
 
 Lệnh tạo ONNX opset 16, TensorRT engine FP16 và manifest `.engine.json`.
@@ -247,15 +251,19 @@ TensorRT 8.5.2 trên JetPack hiện tại không parse được graph opset 17 v
 `LayerNormalization`. Runtime kiểm tra manifest, checkpoint và shape trước khi
 suy luận; không tự chuyển sang PyTorch nếu engine sai.
 
-Để thử trong Docker Compose, đặt trong `.env` ở thư mục gốc:
+Trong Settings, chọn `Depth Anything V2 · TensorRT` để backend tự chọn engine
+theo baseline. Sự lựa chọn có hiệu lực ở lần khởi động runtime tiếp theo.
+`Theo cấu hình server` giữ tương thích với hai biến môi trường cũ trong `.env`:
 
 ```env
 NVC_DEPTH_BACKEND=tensorrt
 NVC_TENSORRT_ENGINE_PATH=/app/weights/tensorrt/vits-b2-280x504.engine
 ```
 
-Sau đó build lại backend và start runtime từ dashboard. Muốn quay về đường chạy
-hiện tại, đặt `NVC_DEPTH_BACKEND=pytorch`, build lại backend và start runtime.
+Các biến môi trường này chỉ áp dụng khi Settings chọn `Theo cấu hình server`.
+Nếu bỏ `NVC_TENSORRT_ENGINE_PATH` và để `NVC_DEPTH_BACKEND=tensorrt`, chế độ
+server cũng tự chọn engine batch động. Nếu lưu engine ở thư mục khác, đặt
+`NVC_TENSORRT_ENGINE_DIRECTORY` (mặc định `/app/weights/tensorrt`).
 Trước khi dùng kết quả để quyết định hành lang, cần so depth map và trạng thái
 zone trên cùng frame giữa PyTorch và TensorRT, rồi đo FPS/latency cả pipeline.
 

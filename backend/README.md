@@ -253,17 +253,19 @@ suy luận; không tự chuyển sang PyTorch nếu engine sai.
 
 Trong Settings, chọn `Depth Anything V2 · TensorRT` để backend tự chọn engine
 theo baseline. Sự lựa chọn có hiệu lực ở lần khởi động runtime tiếp theo.
-`Theo cấu hình server` dùng `NVC_DEPTH_BACKEND` trong `.env`:
+`Theo cấu hình server` dùng phần `model` trong `data/config.json`:
 
-```env
-NVC_DEPTH_BACKEND=tensorrt
-NVC_TENSORRT_ENGINE_DIRECTORY=/app/weights/tensorrt
+```json
+"model": {
+  "depth_backend": "tensorrt",
+  "tensorrt_engine_directory": "/app/weights/tensorrt"
+}
 ```
 
-Khi không đặt `NVC_TENSORRT_ENGINE_PATH`, chế độ server cũng tự chọn engine
-batch động. Biến `NVC_TENSORRT_ENGINE_DIRECTORY` trỏ tới thư mục chứa các
-thư mục `input-<size>` (mặc định `/app/weights/tensorrt`). Đường dẫn engine
-tĩnh qua `NVC_TENSORRT_ENGINE_PATH` chỉ dùng cho cấu hình cũ.
+Backend đọc phần này khi khởi động. Khi không đặt `NVC_TENSORRT_ENGINE_PATH`,
+chế độ server tự chọn engine batch động. `tensorrt_engine_directory` trỏ tới
+thư mục chứa các thư mục `input-<size>`. Đường dẫn engine tĩnh qua
+`NVC_TENSORRT_ENGINE_PATH` chỉ dùng cho cấu hình cũ.
 Trước khi dùng kết quả để quyết định hành lang, cần so depth map và trạng thái
 zone trên cùng frame giữa PyTorch và TensorRT, rồi đo FPS/latency cả pipeline.
 

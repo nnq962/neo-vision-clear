@@ -1,10 +1,13 @@
-"""Cấu hình runtime và HTTP server lấy từ biến môi trường."""
+"""Cấu hình hạ tầng từ môi trường và model mặc định từ config JSON."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
+
+from server.models.config import ModelConfig
 
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = str(BACKEND_DIRECTORY / "data" / "config.json")
@@ -35,16 +38,19 @@ class ServerSettings:
 
     @classmethod
     def from_env(cls) -> "ServerSettings":
-        """Tạo cấu hình hạ tầng server từ các biến môi trường của process."""
+        """Tạo cấu hình server và đọc model mặc định từ config JSON."""
         # Bước 1: camera và runtime nghiệp vụ nằm trong config JSON; biến môi
         # trường chỉ còn quản lý hạ tầng của chính process server.
         checkpoint = os.getenv("WALKWAY_CHECKPOINT") or None
         aggregator_url = os.getenv("NVC_AGGREGATOR_WS_BASE_URL", "").strip()
+        config_path = os.getenv("NVC_CONFIG_PATH", DEFAULT_CONFIG_PATH)
+        try:
+            with Path(config_path).open(encoding="utf-8") as source:
+                model_config = ModelConfig.model_validate(json.load(source).get("model", {}))
+        except FileNotFoundError:
+            model_config = ModelConfig()
         return cls(
-            camera_config_path=os.getenv(
-                "NVC_CONFIG_PATH",
-                DEFAULT_CONFIG_PATH,
-            ),
+            camera_config_path=config_path,
             baselines_directory=os.getenv(
                 "NVC_BASELINES_PATH",
                 DEFAULT_BASELINES_DIRECTORY,
@@ -54,13 +60,11 @@ class ServerSettings:
                 "rtsp://127.0.0.1:8554",
             ),
             checkpoint_path=checkpoint,
-            depth_backend=os.getenv("NVC_DEPTH_BACKEND", "pytorch").strip().lower(),
+            depth_backend=model_config.depth_backend,
             tensorrt_engine_path=(
                 os.getenv("NVC_TENSORRT_ENGINE_PATH", "").strip() or None
             ),
-            tensorrt_engine_directory=os.getenv(
-                "NVC_TENSORRT_ENGINE_DIRECTORY", DEFAULT_TENSORRT_ENGINE_DIRECTORY
-            ),
+            tensorrt_engine_directory=model_config.tensorrt_engine_directory,
             host=os.getenv("WALKWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("WALKWAY_PORT", "8000")),
             snapshot_max_age_seconds=float(

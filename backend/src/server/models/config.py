@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -98,6 +99,18 @@ class RuntimeProcessResponse(BaseModel):
     started_at: datetime | None = None
 
 
+class ModelConfig(BaseModel):
+    """Cấu hình model mặc định khi runtime chọn chế độ tự động."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    depth_backend: Literal["pytorch", "tensorrt"] = "pytorch"
+    tensorrt_engine_directory: str = Field(
+        default=str(Path(__file__).resolve().parents[3] / "weights" / "tensorrt"),
+        min_length=1,
+    )
+
+
 class AppConfigDocument(BaseModel):
     """Tài liệu data/config.json chứa camera, baseline, runtime và UART."""
 
@@ -106,6 +119,7 @@ class AppConfigDocument(BaseModel):
     version: Literal[2] = 2
     cameras: list[CameraConfig] = Field(default_factory=list)
     baselines: list[CalibrationConfig] = Field(default_factory=list)
+    model: ModelConfig = Field(default_factory=ModelConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     uart: UartConfig = Field(default_factory=UartConfig)
 

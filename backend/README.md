@@ -230,19 +230,19 @@ một engine hỗ trợ batch 1–2. Backend tự tìm engine theo encoder và s
 baseline tạo ra. Thư mục `weights/tensorrt` không được commit. Dừng runtime
 detection trước khi build vì `trtexec` dùng GPU.
 
-Các baseline 960×540 hiện có dùng `input_size` 140, 196, 224 hoặc 280. Build
-một engine batch động cho mỗi kích thước:
+Với frame 960×540, các engine hiện có dùng `input_size` 140, 196, 224,
+280, 392 và 518. Mỗi kích thước có một thư mục `input-<size>` riêng:
 
 ```bash
 cd backend
 uv sync --extra tensorrt-export
-for shape in 140x252 196x350 224x392 280x504; do
+for shape in 140x252 196x350 224x392 280x504 392x700 518x924; do
   size=${shape%x*}
   uv run --extra tensorrt-export python -m walkway_monitor.depth.tensorrt_build \
     --checkpoint weights/pytorch/depth-anything-v2/depth_anything_v2_vits.pth \
     --encoder vits --input-size "$size" \
     --frame-width 960 --frame-height 540 --dynamic-batch 2 \
-    --engine "weights/tensorrt/vits-b1-2-${shape}.engine"
+    --engine "weights/tensorrt/input-${size}/vits-b1-2-${shape}.engine"
 done
 ```
 
@@ -253,17 +253,17 @@ suy luận; không tự chuyển sang PyTorch nếu engine sai.
 
 Trong Settings, chọn `Depth Anything V2 · TensorRT` để backend tự chọn engine
 theo baseline. Sự lựa chọn có hiệu lực ở lần khởi động runtime tiếp theo.
-`Theo cấu hình server` giữ tương thích với hai biến môi trường cũ trong `.env`:
+`Theo cấu hình server` dùng `NVC_DEPTH_BACKEND` trong `.env`:
 
 ```env
 NVC_DEPTH_BACKEND=tensorrt
-NVC_TENSORRT_ENGINE_PATH=/app/weights/tensorrt/vits-b2-280x504.engine
+NVC_TENSORRT_ENGINE_DIRECTORY=/app/weights/tensorrt
 ```
 
-Các biến môi trường này chỉ áp dụng khi Settings chọn `Theo cấu hình server`.
-Nếu bỏ `NVC_TENSORRT_ENGINE_PATH` và để `NVC_DEPTH_BACKEND=tensorrt`, chế độ
-server cũng tự chọn engine batch động. Nếu lưu engine ở thư mục khác, đặt
-`NVC_TENSORRT_ENGINE_DIRECTORY` (mặc định `/app/weights/tensorrt`).
+Khi không đặt `NVC_TENSORRT_ENGINE_PATH`, chế độ server cũng tự chọn engine
+batch động. Biến `NVC_TENSORRT_ENGINE_DIRECTORY` trỏ tới thư mục chứa các
+thư mục `input-<size>` (mặc định `/app/weights/tensorrt`). Đường dẫn engine
+tĩnh qua `NVC_TENSORRT_ENGINE_PATH` chỉ dùng cho cấu hình cũ.
 Trước khi dùng kết quả để quyết định hành lang, cần so depth map và trạng thái
 zone trên cùng frame giữa PyTorch và TensorRT, rồi đo FPS/latency cả pipeline.
 

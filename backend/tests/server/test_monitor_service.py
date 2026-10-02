@@ -261,7 +261,7 @@ class MonitorServiceTestCase(unittest.TestCase):
                 self.assertTrue(pipeline.started.wait(timeout=1.0))
                 self.assertEqual(
                     received_options["engine_path"],
-                    self.baselines_directory / "vits-b1-2-280x504.engine",
+                    self.baselines_directory / "input-280" / "vits-b1-2-280x504.engine",
                 )
                 service.stop(wait=False)
                 self._wait_for_status(service, "stopped")

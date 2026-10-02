@@ -68,7 +68,11 @@ def dynamic_engine_path(
     frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
     image, _size = prepare_image(frame, input_size)
     height, width = image.shape[1:]
-    return Path(directory) / f"{encoder}-b1-2-{height}x{width}.engine"
+    return (
+        Path(directory)
+        / f"input-{input_size}"
+        / f"{encoder}-b1-2-{height}x{width}.engine"
+    )
 
 
 class TensorRTDepthEstimator:

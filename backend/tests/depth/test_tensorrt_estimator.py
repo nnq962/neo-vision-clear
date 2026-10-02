@@ -59,10 +59,14 @@ class TensorRTMetadataTestCase(unittest.TestCase):
     # ─────────────────────────────────────────────────────────────────────────
 
     def test_dynamic_engine_path_uses_preprocessing_shape(self) -> None:
-        """Các input size hiện có ánh xạ đúng bốn engine batch động."""
-        for size, width in ((140, 252), (196, 350), (224, 392), (280, 504)):
+        """Các input size hiện có ánh xạ đúng thư mục engine batch động."""
+        for size, width in (
+            (140, 252), (196, 350), (224, 392),
+            (280, 504), (392, 700), (518, 924),
+        ):
             with self.subTest(size=size):
                 path = dynamic_engine_path("/models", "vits", size, 960, 540)
+                self.assertEqual(path.parent.name, f"input-{size}")
                 self.assertEqual(path.name, f"vits-b1-2-{size}x{width}.engine")
 
 
